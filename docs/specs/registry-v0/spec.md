@@ -150,3 +150,16 @@ Depends on: R-E2
 ## Changelog
 
 - 2026-07-13 — initial draft from the approved engineering spec set (SCOPE-minimal Phase B cut).
+
+## Issue map
+
+Generated from this spec (`<!-- spec:registry-v0 -->`) on 2026-07-13. All epics and sub-issues are **Phase B — `status:blocked`** (milestone-gated until Phase A exit; also require `gridmason/protocol` M-B verify lib and `gridmason/cli` M-A shared checks module). None is `status:ready`.
+
+| Epic | Issue | Sub-issues (all `status:blocked`) |
+|---|---|---|
+| R-E0 Bootstrap | [#1](../../../../issues/1) | [#2](../../../../issues/2) Service skeleton · [#3](../../../../issues/3) Storage layer · [#4](../../../../issues/4) Community files + policy-page template |
+| R-E1 Publish pipeline | [#5](../../../../issues/5) | [#6](../../../../issues/6) Publisher records + prefix API · [#7](../../../../issues/7) Publish API · [#8](../../../../issues/8) Automated review stage · [#9](../../../../issues/9) Human review lane · [#10](../../../../issues/10) Countersign + transparency logging |
+| R-E2 Distribution | [#11](../../../../issues/11) | [#12](../../../../issues/12) Hash-addressed serving · [#13](../../../../issues/13) Resolution API · [#14](../../../../issues/14) Revocation & kill feed · [#15](../../../../issues/15) Audit-event completeness pass |
+| R-E3 Self-host + e2e | [#16](../../../../issues/16) | [#17](../../../../issues/17) Install story · [#18](../../../../issues/18) Rotation + key-custody runbook · [#19](../../../../issues/19) Full-chain e2e |
+
+Totals: 4 epics, 15 sub-issues. Milestones: M-B1 = R-E0 + R-E1; M-B2 (repo exit) = R-E2 + R-E3.
