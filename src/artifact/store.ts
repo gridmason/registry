@@ -45,6 +45,17 @@ export interface ArtifactStore {
     tag: string,
     version: string,
   ): Promise<ArtifactRecord | null>;
+  /**
+   * Advance an artifact's lifecycle state from `from` to `to`, returning the
+   * updated record — or `null` when the artifact is not currently in `from` (a
+   * concurrent transition already moved it). Only `state` changes; identity and
+   * content columns are frozen by the immutability trigger (migration 0001).
+   */
+  transition(
+    id: string,
+    from: ArtifactState,
+    to: ArtifactState,
+  ): Promise<ArtifactRecord | null>;
 }
 
 interface ArtifactRow {
@@ -146,6 +157,18 @@ export function createPostgresArtifactStore(
       );
       return rows[0] ? rowToRecord(rows[0] as ArtifactRow) : null;
     },
+
+    async transition(id, from, to) {
+      // The `state = from` guard makes the move a no-op (null result) when the
+      // artifact has already left `from`, so concurrent reviews cannot double-move.
+      const { rows } = await postgres.query(
+        `UPDATE artifact SET state = $3
+           WHERE id = $1 AND state = $2
+           RETURNING ${SELECT_COLUMNS}`,
+        [id, from, to],
+      );
+      return rows[0] ? rowToRecord(rows[0] as ArtifactRow) : null;
+    },
   };
 }
 
@@ -195,5 +218,19 @@ export class InMemoryArtifactStore implements ArtifactStore {
           r.publisherId === publisherId && r.tag === tag && r.version === version,
       ) ?? null,
     );
+  }
+
+  transition(
+    id: string,
+    from: ArtifactState,
+    to: ArtifactState,
+  ): Promise<ArtifactRecord | null> {
+    const index = this.records.findIndex((r) => r.id === id);
+    if (index === -1) return Promise.resolve(null);
+    const current = this.records[index]!;
+    if (current.state !== from) return Promise.resolve(null);
+    const updated: ArtifactRecord = { ...current, state: to };
+    this.records[index] = updated;
+    return Promise.resolve(updated);
   }
 }

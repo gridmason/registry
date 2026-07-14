@@ -25,6 +25,8 @@ import {
 } from './http/readiness.js';
 import type { Logger } from './logging/index.js';
 import { createPostgresPublisherStore, type PublisherStore } from './publisher/store.js';
+import { createAutomatedReviewStage } from './review/automated.js';
+import { createPostgresReviewCaseStore, type ReviewCaseStore } from './review/store.js';
 import type { ObjectStore } from './storage/object-store.js';
 import { registerStorageProbes, type Storage } from './storage/index.js';
 
@@ -56,6 +58,13 @@ export interface BuildServerOptions {
    * store.
    */
   objectStore?: ObjectStore;
+  /**
+   * Review-case store backing the automated-review stage (#8). Defaults to a
+   * Postgres-backed store over `storage.postgres` when `storage` is given, so the
+   * real service always reviews on publish; tests inject an in-memory store (or
+   * omit it to exercise intake without review).
+   */
+  reviewCaseStore?: ReviewCaseStore;
   /**
    * OIDC verifier backing publisher registration and publish intake. Defaults to
    * one built from `config.oidc` (real discovery + JWKS). Tests inject a verifier
@@ -124,12 +133,24 @@ export async function buildServer(options: BuildServerOptions) {
         : undefined);
     const objectStore = options.objectStore ?? options.storage?.objectStore;
     if (artifactStore && objectStore) {
+      // The automated-review stage mounts alongside publish whenever a review-case
+      // store is available (always in the real service, where storage backs it),
+      // so every accepted upload is reviewed before the response (FR-3).
+      const reviewCaseStore =
+        options.reviewCaseStore ??
+        (options.storage
+          ? createPostgresReviewCaseStore(options.storage.postgres)
+          : undefined);
+      const reviewStage = reviewCaseStore
+        ? createAutomatedReviewStage({ artifactStore, reviewCaseStore })
+        : undefined;
       await app.register(publishRoutes, {
         publisherStore,
         artifactStore,
         objectStore,
         registryId: config.registryId,
         verifier,
+        reviewStage,
       });
     }
   }

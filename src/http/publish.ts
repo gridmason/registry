@@ -34,6 +34,7 @@ import type { ArtifactStore } from '../artifact/store.js';
 import { parseArtifactUpload } from '../artifact/upload.js';
 import { composeOidcIdentity } from '../publisher/types.js';
 import type { PublisherStore } from '../publisher/store.js';
+import type { AutomatedReviewStage } from '../review/automated.js';
 import type { ObjectStore } from '../storage/object-store.js';
 import { sendError } from './errors.js';
 import { OIDC_REJECTION_RESPONSES } from './oidc-rejection.js';
@@ -44,13 +45,22 @@ interface PublishPluginOptions extends FastifyPluginOptions {
   objectStore: ObjectStore;
   registryId: string;
   verifier: OidcVerifier;
+  /**
+   * The automated-review stage (#8). When wired, a successful upload is handed
+   * straight to it: it runs the shared checks, persists the report, and moves the
+   * artifact `submitted → reviewing`/`rejected`, so the response reflects the
+   * reviewed state. The real service always wires it; a narrow intake-only test
+   * may omit it to assert the `submitted` intake in isolation.
+   */
+  reviewStage?: AutomatedReviewStage;
 }
 
 export async function publishRoutes(
   app: FastifyInstance,
   options: PublishPluginOptions,
 ): Promise<void> {
-  const { publisherStore, artifactStore, objectStore, registryId, verifier } = options;
+  const { publisherStore, artifactStore, objectStore, registryId, verifier, reviewStage } =
+    options;
 
   app.post('/v1/artifacts', async (request, reply) => {
     const token = extractBearerToken(request.headers.authorization);
@@ -147,7 +157,19 @@ export async function publishRoutes(
     }
 
     emitAuditEvent(actor, 'publish.submitted', created.record.id);
+
+    // Hand the submitted artifact straight to automated review (#8): it runs the
+    // shared checks, persists the report, and advances the artifact to
+    // `reviewing` or `rejected`, so the publisher sees the reviewed state in the
+    // response. The parsed upload `files` (roles + bytes) are passed directly, so
+    // the review reads the manifest and served source without re-fetching blobs.
+    let record = created.record;
+    if (reviewStage) {
+      const outcome = await reviewStage.review(created.record, files);
+      record = outcome.artifact;
+    }
+
     reply.code(201);
-    return toArtifactResponse(created.record, registryId);
+    return toArtifactResponse(record, registryId);
   });
 }
