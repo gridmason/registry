@@ -22,6 +22,11 @@ import {
   type CountersignIdentity,
 } from './countersign/index.js';
 import { createPostgresReleaseDocStore, type ReleaseDocStore } from './release/store.js';
+import {
+  createPostgresFeedEntryStore,
+  createRevocationService,
+  type FeedEntryStore,
+} from './revocation/index.js';
 import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
@@ -29,6 +34,7 @@ import { resolutionRoutes } from './http/resolution.js';
 import { servingRoutes } from './http/serving.js';
 import { publisherRoutes } from './http/publisher.js';
 import { reviewRoutes } from './http/review.js';
+import { revocationRoutes } from './http/revocation.js';
 import {
   createDefaultReadinessRegistry,
   type ReadinessRegistry,
@@ -87,6 +93,11 @@ export interface BuildServerOptions {
    * in dev); tests inject the in-process log to read back its checkpoint key.
    */
   transparencyLog?: TransparencyLog;
+  /**
+   * Feed-entry store backing the revocation & kill feed (#14). Defaults to a
+   * Postgres-backed store over `storage.postgres`; tests inject an in-memory store.
+   */
+  feedEntryStore?: FeedEntryStore;
   /**
    * Registry countersign identity (the separately-held key, SPEC §2). Defaults to
    * one loaded from `config.countersign`; when neither this nor config provides a
@@ -185,6 +196,13 @@ export async function buildServer(options: BuildServerOptions) {
         ? createPostgresReviewCaseStore(options.storage.postgres)
         : undefined);
 
+    // The registry countersign identity (the separately-held key, SPEC §2) is
+    // shared by two consumers: the approval-time countersign stage below and the
+    // revocation-feed signer — both must verify against the same trust root
+    // (SPEC §6), so they load the one key.
+    const countersignIdentity =
+      options.countersignIdentity ?? loadCountersignIdentity(config.countersign);
+
     if (artifactStore && objectStore) {
       // The automated-review stage mounts alongside publish whenever a review-case
       // store is available (always in the real service, where storage backs it),
@@ -228,8 +246,6 @@ export async function buildServer(options: BuildServerOptions) {
       // mounts only when a separately-held countersign key is configured and a
       // release-doc store is available; otherwise an approval simply records the
       // verdict without publishing a release (the Phase-A author-loop demo shape).
-      const countersignIdentity =
-        options.countersignIdentity ?? loadCountersignIdentity(config.countersign);
       const releaseDocStore =
         options.releaseDocStore ??
         (options.storage
@@ -264,6 +280,27 @@ export async function buildServer(options: BuildServerOptions) {
         verifier,
         reviewerIdentities: config.review.reviewerIdentities,
         registryId: config.registryId,
+      });
+    }
+
+    // The revocation & kill feed (#14) is the registry's distribution-state
+    // authority (SPEC §6). It mounts when the countersign key is configured — the
+    // feed is signed with it so hosts verify against the same trust root — and a
+    // feed-entry store is available. The public feed is anonymous; the revoke/kill
+    // ops endpoints are gated on the config-listed operator set.
+    const feedEntryStore =
+      options.feedEntryStore ??
+      (options.storage ? createPostgresFeedEntryStore(options.storage.postgres) : undefined);
+    if (artifactStore && feedEntryStore && countersignIdentity) {
+      const service = createRevocationService({ artifactStore, feedEntryStore });
+      await app.register(revocationRoutes, {
+        service,
+        feedEntryStore,
+        countersignIdentity,
+        verifier,
+        operatorIdentities: config.ops.operatorIdentities,
+        registryId: config.registryId,
+        feedTtlSeconds: config.revocation.feedTtlSeconds,
       });
     }
   }
