@@ -33,7 +33,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
     "@gridmason/cli": "^0.0.3",
-    "@gridmason/protocol": "^0.0.5",
+    "@gridmason/protocol": "^0.1.0",
     "fastify": "^5.2.0",
     "jose": "^6.2.3",
     "pg": "^8.22.0",

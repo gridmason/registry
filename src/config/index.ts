@@ -79,6 +79,59 @@ export interface ReviewConfig {
   readonly selfReviewWaiver: boolean;
 }
 
+/**
+ * Registry countersignature key custody (SPEC §2, §4a — the countersign key is
+ * held separately from review staff).
+ *
+ * The key is sourced from a **custody-controlled secret**, never derived from or
+ * shared with any review-lane identity ({@link ReviewConfig.reviewerIdentities}):
+ * these two fields come from their own environment variables so the separation is
+ * visible in the wiring. Both empty means the instance has no countersign key
+ * configured and the countersign stage does not mount — an instance that only
+ * runs intake/review (e.g. the Phase-A author-loop demo) needs neither.
+ *
+ * Custody guidance and the openssl provisioning recipe live in
+ * `docs/countersign.md`; the secret is mounted into the process (env or a
+ * secret-manager projection), it is never written from the application UI.
+ */
+export interface CountersignConfig {
+  /**
+   * PEM-encoded PKCS#8 private key (ECDSA P-256) the registry signs the
+   * countersignature with. Empty when no countersign key is configured.
+   */
+  readonly privateKeyPem: string;
+  /**
+   * PEM-encoded X.509 certificate (ECDSA P-256 leaf) carried in the
+   * countersignature envelope; hosts pin its issuing root as a countersign root.
+   * Empty when no countersign key is configured.
+   */
+  readonly certificatePem: string;
+}
+
+/** Which transparency log the countersign stage anchors releases in. */
+export type TransparencyLogDriver = 'memory' | 'rekor';
+
+/**
+ * Transparency-log settings (SPEC §2 §4.3, GW-D17). The flagship anchors to the
+ * public Sigstore infrastructure (Rekor) rather than operating its own log; the
+ * self-hosted Rekor fallback is Phase C and is not built here.
+ */
+export interface TransparencyLogConfig {
+  /**
+   * `rekor` for the real Sigstore/Rekor HTTP client (production, GW-D17);
+   * `memory` for the in-process append-only log (dev + tests). Defaults to
+   * `memory` so a fresh instance boots without a network dependency.
+   */
+  readonly driver: TransparencyLogDriver;
+  /** Base URL of the Rekor instance when `driver === 'rekor'` (e.g. the public `https://rekor.sigstore.dev`). */
+  readonly rekorUrl: string;
+  /**
+   * The log's checkpoint `origin` line (its identity in signed tree heads).
+   * Defaults to this registry's id so a self-hosted `memory` log names itself.
+   */
+  readonly origin: string;
+}
+
 /** HTTP transport caps applied at the Fastify/Node server boundary. */
 export interface HttpConfig {
   /**
@@ -145,6 +198,10 @@ export interface Config {
   readonly oidc: OidcConfig;
   /** Human review lane settings. */
   readonly review: ReviewConfig;
+  /** Registry countersignature key custody (held separately from review staff). */
+  readonly countersign: CountersignConfig;
+  /** Transparency-log settings the countersign stage anchors releases in. */
+  readonly transparencyLog: TransparencyLogConfig;
   /** HTTP transport caps. */
   readonly http: HttpConfig;
   /** Postgres connection settings. */
@@ -193,6 +250,17 @@ function readStringList(env: Env, key: string, fallback: readonly string[]): str
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry !== '');
+}
+
+/**
+ * Read a PEM secret from the environment, tolerating a single-line value whose
+ * newlines were `\n`-escaped (the common shape when a PEM is projected into an
+ * env var). Empty/absent yields `''` — the caller treats that as "not configured".
+ */
+function readPem(env: Env, key: string): string {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return '';
+  return raw.includes('\\n') ? raw.replace(/\\n/g, '\n') : raw;
 }
 
 function readBool(env: Env, key: string, fallback: boolean): boolean {
@@ -278,6 +346,26 @@ export function loadConfig(env: Env = process.env): Config {
       reviewerIdentities: readStringList(env, 'REVIEW_REVIEWER_IDENTITIES', []),
       // Off by default; a self-host instance must never turn it on (SPEC §4a).
       selfReviewWaiver: readBool(env, 'REVIEW_SELF_REVIEW_WAIVER', false),
+    },
+    countersign: {
+      // Custody-controlled secrets, sourced from their own env vars — never from a
+      // reviewer identity (SPEC §2). A single-line env value may `\n`-escape the
+      // PEM newlines; normalize them back so a projected secret works either way.
+      privateKeyPem: readPem(env, 'COUNTERSIGN_PRIVATE_KEY'),
+      certificatePem: readPem(env, 'COUNTERSIGN_CERTIFICATE'),
+    },
+    transparencyLog: {
+      driver: readEnum(env, 'TRANSPARENCY_LOG_DRIVER', 'memory', [
+        'memory',
+        'rekor',
+      ] as const),
+      rekorUrl: readString(env, 'TRANSPARENCY_LOG_REKOR_URL', 'https://rekor.sigstore.dev'),
+      // Defaults to the registry id so a self-hosted memory log names itself.
+      origin: readString(
+        env,
+        'TRANSPARENCY_LOG_ORIGIN',
+        readString(env, 'REGISTRY_ID', 'registry.local'),
+      ),
     },
     http: {
       bodyLimitBytes: readInt(env, 'HTTP_BODY_LIMIT_BYTES', 65_536, {
