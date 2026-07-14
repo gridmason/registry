@@ -1,0 +1,35 @@
+{
+  "variantId": "flagship",
+  "variantLabel": "Flagship instance — invite-only launch",
+  "templateVersion": "1.0",
+  "effectiveDate": "2026-07-14",
+  "instanceName": "Gridmason Registry (flagship)",
+  "registryUrl": "https://registry.gridmason.dev",
+  "operatorName": "Sniper7Kills LLC, stewards of the Gridmason project",
+
+  "singleRosterWaiver": true,
+  "slasAreTargets": true,
+  "rosterSize": "1",
+
+  "transparencyLog": "This instance anchors to the public Sigstore infrastructure (Fulcio for keyless certs, Rekor as the log) rather than operating its own CA/log (SPEC §2, GW-D17). Anyone can independently verify what this registry has shipped.",
+
+  "reviewPolicyIntro": "The flagship's review policy is published in full here. It opens invite-only: only verified publishers may publish while the review roster is single-person (see the launch-phase disclosure in §4).",
+
+  "reviewTiers": [
+    { "tier": "T1 — declarative", "covers": "No executable content — layouts, page types, dashboards.", "sla": "2 days" },
+    { "tier": "TF — frontend remote", "covers": "Plain-JS widget/plugin remotes (the common case): SDK-adherence static analysis + DOM-abuse heuristics over a signed source archive.", "sla": "5 days" }
+  ],
+  "capIncreaseSla": "3 days (target)",
+  "securityLaneSla": "24 hours (target)",
+  "currentLatency": "published on this page and refreshed as the roster reports; until automated latency reporting lands, the operator updates this figure manually",
+
+  "countersignCustodyNote": "the countersign key is an offline key, held distinct from the reviewer's publishing identity, and its custody procedure is documented before launch — even while both the review and countersign roles are held by one person during the single-roster phase.",
+
+  "rosterNote": "The flagship launches with a single-person review roster (GW-D18). Its size and the resulting waiver are disclosed above and flagged per affected release in the transparency log. The roster grows to ≥ 2 reviewers before open community publishing (Phase C).",
+
+  "ttlHours": "24",
+  "revocationSeverityNote": "actively-exploited or credential-path issues are killed immediately, with deployment notification within 24 hours; other revocations propagate within 1 hour online (next bundle sync for air-gapped hosts).",
+
+  "contactNote": "Reach the Gridmason project maintainers through the <a href=\"https://github.com/gridmason\">gridmason GitHub organization</a>. Publishing on the flagship is invite-only during the launch phase.",
+  "securityContactUrl": "https://github.com/gridmason/registry/blob/main/SECURITY.md"
+}

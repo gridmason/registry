@@ -1,0 +1,35 @@
+{
+  "variantId": "self-host",
+  "variantLabel": "Self-hosted instance",
+  "templateVersion": "1.0",
+  "effectiveDate": "YYYY-MM-DD (operator: set on publish)",
+  "instanceName": "ACME Registry (operator: set instance name)",
+  "registryUrl": "https://registry.example.com",
+  "operatorName": "ACME Corp (operator: set legal operator name)",
+
+  "singleRosterWaiver": false,
+  "slasAreTargets": false,
+  "rosterSize": "0",
+
+  "transparencyLog": "This instance brings its own countersign key and trust roots, generated at install. Configure whether transparency-log inclusion is a required verify check for your hosts (policy-configurable pre-1.0, SPEC §2). Operator: state your log arrangement here.",
+
+  "reviewPolicyIntro": "Operator: state your review policy here — who may publish, identity tiers accepted, and any instance-specific acceptance rules. The tiers and checks below are the platform defaults; adjust the SLAs to what you actually commit to.",
+
+  "reviewTiers": [
+    { "tier": "T1 — declarative", "covers": "No executable content — layouts, page types, dashboards.", "sla": "operator-defined" },
+    { "tier": "TF — frontend remote", "covers": "Plain-JS widget/plugin remotes: SDK-adherence static analysis + DOM-abuse heuristics over a signed source archive.", "sla": "operator-defined" }
+  ],
+  "capIncreaseSla": "operator-defined",
+  "securityLaneSla": "operator-defined",
+  "currentLatency": "",
+
+  "countersignCustodyNote": "operator: document where this instance's countersign key lives and who holds it. Keep it offline and separate from review staff (SPEC §2). This instance's key is generated at install and is unrelated to the Gridmason flagship's key.",
+
+  "rosterNote": "Operator: list your review roster and staffing here. Because separation of duties is enforced on this instance, you need at least two reviewers so that reviewer ≠ author for your own team's publications.",
+
+  "ttlHours": "24",
+  "revocationSeverityNote": "operator: state your severity and kill-switch policy. The platform default is to kill actively-exploited or credential-path issues immediately and propagate other revocations within 1 hour online.",
+
+  "contactNote": "Operator: provide the contact and reporting channels for this instance.",
+  "securityContactUrl": "SECURITY.md"
+}
