@@ -33,7 +33,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
     "@gridmason/cli": "^0.0.3",
-    "@gridmason/protocol": "^0.2.0",
+    "@gridmason/protocol": "^0.3.0",
     "fastify": "^5.2.0",
     "jose": "^6.2.3",
     "pg": "^8.22.0",
@@ -43,6 +43,7 @@
     "@eslint/js": "^9.17.0",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.20.0",
+    "ajv": "^8.17.1",
     "eslint": "^9.17.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",

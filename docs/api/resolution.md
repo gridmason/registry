@@ -11,6 +11,23 @@ It does **not** serve the bytes (that is the serving surface, #12) and does **no
 decide enablement (that is the host's own gate service) — it maps an already-decided
 gate snapshot to verifiable URLs.
 
+## Wire contract lives in `@gridmason/protocol`
+
+The gate-snapshot request and import-map-fragment response shapes are defined by
+`@gridmason/protocol` (`types/resolution`, package ≥ 0.3.0): `GateSnapshot`,
+`GateModule`, `SharedOffer`, `ImportMapFragment`, `ResolvedModule`,
+`SignatureBundle`, `ExcludedModule`, and `ExclusionReason`. The registry authored
+these shapes and owned them alone until the Gridmason Dashboard's Phase-B remote
+loader joined as a second consumer, at which point they were **promoted** into the
+shared package (protocol #66) with generated JSON schemas and ajv vectors. The
+registry now re-exports them from `@gridmason/protocol` (`src/resolution/types.ts`)
+rather than owning them; hosts pin the same contract instead of copying it.
+
+Every `POST /v1/resolve` response validates against the published schema
+`@gridmason/protocol/schemas/import-map-fragment.json` (asserted in
+`test/resolution/api.int.test.ts`); the request body has a companion
+`gate-snapshot.json` schema.
+
 ## Anonymous, never a control plane
 
 `POST /v1/resolve` takes **no authentication** and requires **no deployment

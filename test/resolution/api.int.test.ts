@@ -18,6 +18,9 @@
  * step onward: intake's placeholder envelope is not yet the countersign-verifiable
  * shape (P-E3), so the artifact is seeded and approved from the countersign fixtures.
  */
+import { createRequire } from 'node:module';
+
+import { Ajv, type ValidateFunction } from 'ajv';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { hashBytes, verifyRelease, type MultihashString, type TrustRootPin } from '@gridmason/protocol';
@@ -41,6 +44,19 @@ import {
   makePublisherFixture,
 } from '../countersign/fixtures/envelope.js';
 import { startFakeIssuer, type FakeIssuer } from '../helpers/oidc-issuer.js';
+
+// The `/v1/resolve` response is the import-map fragment whose wire shape
+// `@gridmason/protocol@0.3.0` now owns (promoted from this repo, protocol #66). The
+// package ships the generated JSON schema; a host's `POST /v1/resolve` reply must
+// validate against it. ajv is how upstream validates JSON documents; the schema is
+// fully self-contained (every `$ref` is internal, including the SignatureBundle
+// sub-shapes), so one compiled validator checks a whole fragment structurally —
+// this is *not* a crypto check (verifyRelease still owns that, above).
+const require = createRequire(import.meta.url);
+const importMapFragmentSchema = require('@gridmason/protocol/schemas/import-map-fragment.json');
+const validateFragment: ValidateFunction = new Ajv({ strict: false, allErrors: true }).compile(
+  importMapFragmentSchema,
+);
 
 const REGISTRY_ID = 'registry.test';
 const FUTURE = Math.floor(Date.now() / 1000) + 3600;
@@ -253,6 +269,48 @@ describe('Resolution API — anonymous fragment, verifiable via @gridmason/proto
       expect(pinned).toContain(servedHash);
       expect(module.url).toBe(`/v1/artifacts/${servedHash}`);
     }
+  });
+
+  it('produces a fragment that validates against @gridmason/protocol/schemas/import-map-fragment.json', async () => {
+    const res = await h.app.inject({ method: 'POST', url: '/v1/resolve', payload: gateSnapshot() });
+    const fragment = res.json();
+
+    // A fully populated fragment — a resolved module carrying its real signature
+    // bundle plus a `scopes` entry — is the richest structural surface, so this
+    // exercises the ResolvedModule / SignatureBundle / ReleaseDoc / SignatureEnvelope
+    // / TransparencyLogEntry sub-schemas the promoted contract defines.
+    expect(fragment.modules).toHaveLength(1);
+    const ok = validateFragment(fragment);
+    expect(validateFragment.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+  });
+
+  it('emits a schema-valid fragment for an empty gate snapshot (nothing enabled)', async () => {
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/v1/resolve',
+      payload: { registry: REGISTRY_ID, modules: [] },
+    });
+    expect(res.statusCode).toBe(200);
+    const ok = validateFragment(res.json());
+    expect(validateFragment.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
+  });
+
+  it('emits a schema-valid fragment when a requested module is excluded', async () => {
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/v1/resolve',
+      payload: {
+        registry: REGISTRY_ID,
+        modules: [{ publisher: 'acme', tag: 'acme-clock', version: '9.9.9' }],
+      },
+    });
+    const fragment = res.json();
+    expect(fragment.excluded).toHaveLength(1);
+    const ok = validateFragment(fragment);
+    expect(validateFragment.errors ?? []).toEqual([]);
+    expect(ok).toBe(true);
   });
 
   it('refuses a snapshot targeting a different registry with a typed error', async () => {
