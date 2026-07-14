@@ -15,11 +15,7 @@
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 
 import { emitAuditEvent } from '../audit/index.js';
-import {
-  extractBearerToken,
-  type OidcRejectionReason,
-  type OidcVerifier,
-} from '../auth/oidc.js';
+import { extractBearerToken, type OidcVerifier } from '../auth/oidc.js';
 import {
   toPrefixOwnershipResponse,
   toPublisherResponse,
@@ -32,6 +28,7 @@ import {
   type PublisherTier,
 } from '../publisher/types.js';
 import { sendError } from './errors.js';
+import { OIDC_REJECTION_RESPONSES } from './oidc-rejection.js';
 
 interface PublisherPluginOptions extends FastifyPluginOptions {
   store: PublisherStore;
@@ -43,43 +40,6 @@ interface RegisterBody {
   prefix?: unknown;
   tier?: unknown;
 }
-
-/** HTTP shape (status + stable error code + message) for each rejection reason. */
-const REJECTION_RESPONSES: Record<
-  OidcRejectionReason,
-  { readonly status: number; readonly code: string; readonly message: string }
-> = {
-  'missing-token': { status: 401, code: 'missing_token', message: 'a bearer token is required' },
-  // Oversized credential: refused before any decode. Kept indistinguishable from
-  // a malformed token (same code/message) so it is not a probing oracle.
-  'token-too-large': { status: 401, code: 'invalid_token', message: 'the token could not be validated' },
-  'malformed-token': { status: 401, code: 'invalid_token', message: 'the token could not be validated' },
-  'missing-claims': { status: 401, code: 'invalid_token', message: 'the token could not be validated' },
-  expired: { status: 401, code: 'token_expired', message: 'the token has expired' },
-  'not-yet-valid': { status: 401, code: 'token_not_yet_valid', message: 'the token is not yet valid' },
-  'issuer-not-allowed': {
-    status: 403,
-    code: 'issuer_not_allowed',
-    message: "the token issuer is not on this registry's allowlist",
-  },
-  'audience-mismatch': {
-    status: 403,
-    code: 'audience_not_allowed',
-    message: 'the token audience does not match this registry',
-  },
-  'invalid-signature': {
-    status: 401,
-    code: 'invalid_token',
-    message: 'the token signature could not be verified against the issuer',
-  },
-  // Fail closed, but 503 (not 401): the registry could not reach the issuer to
-  // decide, so the caller should retry rather than treat the token as bad.
-  'verification-unavailable': {
-    status: 503,
-    code: 'verification_unavailable',
-    message: 'the token issuer could not be reached to verify the token',
-  },
-};
 
 export async function publisherRoutes(
   app: FastifyInstance,
@@ -98,7 +58,7 @@ export async function publisherRoutes(
       // Record the denied attempt (FR-12). The token failed verification, so its
       // claims are untrusted — the event names only the reason, not an identity.
       emitAuditEvent('anonymous', 'publisher.register.denied', `register:${verified.reason}`);
-      const { status, code, message } = REJECTION_RESPONSES[verified.reason];
+      const { status, code, message } = OIDC_REJECTION_RESPONSES[verified.reason];
       return sendError(reply, status, code, message);
     }
     const { issuer, subject } = verified.identity;

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { migration0001 } from '../src/db/migrations/0001_initial_schema.js';
 import { migration0002 } from '../src/db/migrations/0002_publisher_oidc_claims.js';
+import { migration0004 } from '../src/db/migrations/0004_review_case_waiver.js';
 import { migrations } from '../src/db/migrations/index.js';
 
 /**
@@ -70,5 +71,16 @@ describe('publisher OIDC claims migration', () => {
     expect(ids).toContain(migration0002.id);
     expect(ids.indexOf(migration0002.id)).toBe(ids.indexOf(migration0001.id) + 1);
     expect(migrations.filter((m) => m.id === migration0002.id)).toHaveLength(1);
+  });
+});
+
+describe('review case waiver migration', () => {
+  it('adds the waiver_used flag idempotently, defaulting false', () => {
+    const sql = migration0004.up;
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS waiver_used boolean NOT NULL DEFAULT false/);
+  });
+
+  it('is registered exactly once in the ordered set', () => {
+    expect(migrations.filter((m) => m.id === migration0004.id)).toHaveLength(1);
   });
 });

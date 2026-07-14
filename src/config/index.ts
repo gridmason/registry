@@ -59,6 +59,26 @@ export interface OidcConfig {
   readonly audience: string;
 }
 
+/** Human review lane settings (SPEC §4, §4a — the one review lane this cut ships). */
+export interface ReviewConfig {
+  /**
+   * The v0 reviewer set: the OIDC identities permitted to submit a verdict, in
+   * the canonical `composeOidcIdentity` composite form (`<url-encoded-issuer>
+   * <url-encoded-subject>`) — the same string the audit log and publisher records
+   * key on. There is no reviewer console this phase (SCOPE cut), so the reviewer
+   * roster is config, not data. Empty means no identity can review (fail closed).
+   */
+  readonly reviewerIdentities: readonly string[];
+  /**
+   * The disclosed flagship self-review waiver (SPEC §4a). When `true`, an operator
+   * who authored an artifact may also review it (separation of duties waived while
+   * the flagship is single-rostered); the waiver use is recorded on the review
+   * case and audited so the release can be flagged. **Off by default and never
+   * enabled on a self-host instance** — every self-hoster keeps reviewer≠author.
+   */
+  readonly selfReviewWaiver: boolean;
+}
+
 /** HTTP transport caps applied at the Fastify/Node server boundary. */
 export interface HttpConfig {
   /**
@@ -123,6 +143,8 @@ export interface Config {
   readonly registryId: string;
   /** OIDC identity settings. */
   readonly oidc: OidcConfig;
+  /** Human review lane settings. */
+  readonly review: ReviewConfig;
   /** HTTP transport caps. */
   readonly http: HttpConfig;
   /** Postgres connection settings. */
@@ -251,6 +273,11 @@ export function loadConfig(env: Env = process.env): Config {
     oidc: {
       issuerAllowlist,
       audience: readString(env, 'OIDC_AUDIENCE', ''),
+    },
+    review: {
+      reviewerIdentities: readStringList(env, 'REVIEW_REVIEWER_IDENTITIES', []),
+      // Off by default; a self-host instance must never turn it on (SPEC §4a).
+      selfReviewWaiver: readBool(env, 'REVIEW_SELF_REVIEW_WAIVER', false),
     },
     http: {
       bodyLimitBytes: readInt(env, 'HTTP_BODY_LIMIT_BYTES', 65_536, {
