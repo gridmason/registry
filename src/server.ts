@@ -10,9 +10,14 @@ import { randomUUID } from 'node:crypto';
 
 import Fastify from 'fastify';
 
+import {
+  createPostgresArtifactStore,
+  type ArtifactStore,
+} from './artifact/store.js';
 import { createOidcVerifier, type OidcVerifier } from './auth/oidc.js';
 import type { Config } from './config/index.js';
 import { healthRoutes } from './http/health.js';
+import { publishRoutes } from './http/publish.js';
 import { publisherRoutes } from './http/publisher.js';
 import {
   createDefaultReadinessRegistry,
@@ -20,6 +25,7 @@ import {
 } from './http/readiness.js';
 import type { Logger } from './logging/index.js';
 import { createPostgresPublisherStore, type PublisherStore } from './publisher/store.js';
+import type { ObjectStore } from './storage/object-store.js';
 import { registerStorageProbes, type Storage } from './storage/index.js';
 
 export interface BuildServerOptions {
@@ -39,9 +45,21 @@ export interface BuildServerOptions {
    */
   publisherStore?: PublisherStore;
   /**
-   * OIDC verifier backing publisher registration. Defaults to one built from
-   * `config.oidc` (real discovery + JWKS). Tests inject a verifier wired to a
-   * local fake issuer so no network is touched.
+   * Artifact store backing the publish API. Defaults to a Postgres-backed store
+   * over `storage.postgres` when `storage` is given; tests inject an in-memory
+   * store. The publish routes mount only when this and an object store are wired.
+   */
+  artifactStore?: ArtifactStore;
+  /**
+   * Object store the publish API content-addresses uploaded blobs into. Defaults
+   * to `storage.objectStore` when `storage` is given; tests inject an in-memory
+   * store.
+   */
+  objectStore?: ObjectStore;
+  /**
+   * OIDC verifier backing publisher registration and publish intake. Defaults to
+   * one built from `config.oidc` (real discovery + JWKS). Tests inject a verifier
+   * wired to a local fake issuer so no network is touched.
    */
   oidcVerifier?: OidcVerifier;
 }
@@ -95,6 +113,25 @@ export async function buildServer(options: BuildServerOptions) {
       registryId: config.registryId,
       verifier,
     });
+
+    // The publish API keys against publisher records for identity + prefix, so it
+    // mounts only alongside the publisher routes and only when its own stores are
+    // wired. It shares the one verifier so both surfaces enforce the same policy.
+    const artifactStore =
+      options.artifactStore ??
+      (options.storage
+        ? createPostgresArtifactStore(options.storage.postgres, logger)
+        : undefined);
+    const objectStore = options.objectStore ?? options.storage?.objectStore;
+    if (artifactStore && objectStore) {
+      await app.register(publishRoutes, {
+        publisherStore,
+        artifactStore,
+        objectStore,
+        registryId: config.registryId,
+        verifier,
+      });
+    }
   }
 
   return app;

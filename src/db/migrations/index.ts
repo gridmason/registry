@@ -4,8 +4,13 @@
  */
 import { migration0001 } from './0001_initial_schema.js';
 import { migration0002 } from './0002_publisher_oidc_claims.js';
+import { migration0003 } from './0003_artifact_envelope.js';
 import type { Migration } from './types.js';
 
 export type { Migration };
 
-export const migrations: readonly Migration[] = [migration0001, migration0002];
+export const migrations: readonly Migration[] = [
+  migration0001,
+  migration0002,
+  migration0003,
+];
