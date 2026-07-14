@@ -12,11 +12,13 @@ import Fastify from 'fastify';
 
 import type { Config } from './config/index.js';
 import { healthRoutes } from './http/health.js';
+import { publisherRoutes } from './http/publisher.js';
 import {
   createDefaultReadinessRegistry,
   type ReadinessRegistry,
 } from './http/readiness.js';
 import type { Logger } from './logging/index.js';
+import { createPostgresPublisherStore, type PublisherStore } from './publisher/store.js';
 import { registerStorageProbes, type Storage } from './storage/index.js';
 
 export interface BuildServerOptions {
@@ -29,6 +31,12 @@ export interface BuildServerOptions {
    * replace the skeleton's placeholder `storage` readiness probe.
    */
   storage?: Storage;
+  /**
+   * Publisher store backing the publisher/prefix API. Defaults to a
+   * Postgres-backed store over `storage.postgres` when `storage` is given; tests
+   * inject an in-memory store. Absent both, the publisher routes are not mounted.
+   */
+  publisherStore?: PublisherStore;
 }
 
 export async function buildServer(options: BuildServerOptions) {
@@ -57,6 +65,19 @@ export async function buildServer(options: BuildServerOptions) {
     readiness,
     serviceName: config.serviceName,
   });
+
+  const publisherStore =
+    options.publisherStore ??
+    (options.storage
+      ? createPostgresPublisherStore(options.storage.postgres)
+      : undefined);
+  if (publisherStore) {
+    await app.register(publisherRoutes, {
+      store: publisherStore,
+      registryId: config.registryId,
+      issuerAllowlist: config.oidc.issuerAllowlist,
+    });
+  }
 
   return app;
 }

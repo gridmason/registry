@@ -14,6 +14,20 @@ boot immediately with a descriptive `ConfigError` rather than surfacing later.
 | `SERVICE_NAME` | `gridmason-registry` | Logical service name attached to every log line and health response. |
 | `REQUEST_ID_HEADER` | `x-request-id` | Inbound/outbound header carrying the request correlation id. If a request arrives with this header set, its value is adopted as the request id; otherwise a UUID is generated. The id is echoed back on the response and bound to every log line as `reqId`. Compared case-insensitively. |
 | `SHUTDOWN_TIMEOUT_MS` | `10000` | Grace period (ms) for in-flight requests to drain on `SIGTERM`/`SIGINT` before the process force-exits (0–300000). |
+| `REGISTRY_ID` | `registry.local` | This instance's source-qualified registry id (SPEC §9). Every output carrying publisher identity is qualified with it so hosts resolve `(registry, publisher, tag)` and pin each prefix to one registry. Production sets it to the instance's canonical id (e.g. `registry.gridmason.dev`). |
+
+## Identity (OIDC)
+
+Publisher registration is bound to an OIDC identity; the **issuer is the trust
+anchor** (SPEC §2). See [`api/publisher.md`](api/publisher.md).
+
+| Variable | Default | Description |
+|---|---|---|
+| `OIDC_ISSUER_ALLOWLIST` | *(empty)* | Comma-separated list of trusted OIDC issuer URLs. A registration's bearer token is accepted only when its `iss` claim is one of these. **Empty means no issuer is trusted, so no publisher can register (fail closed)** — an instance must set at least one issuer before it accepts registrations. |
+
+> Token **signature** verification against the issuer JWKS is deferred this phase
+> (GW-D19 SCOPE cut): the allowlist + claim binding are enforced, full keyless
+> verification lands with the signing/countersign work.
 
 ## Storage
 
