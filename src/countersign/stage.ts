@@ -232,6 +232,12 @@ export function createCountersignStage(deps: CountersignStageDeps): CountersignS
           { artifactId: artifact.id, err },
           'countersign: release document persistence failed',
         );
+        // The signature and log entry exist, but the release doc did not persist, so
+        // the artifact is approved-but-unpublished. Audit the failure (FR-12 — every
+        // non-published outcome is visible, mirroring release.log_failed) so the
+        // re-drive path (which picks up any approved artifact lacking a release doc)
+        // has a recorded reason.
+        emitAuditEvent(COUNTERSIGN_ACTOR, 'release.persist_failed', publisherEnvelope.subject.artifact);
         return { ok: false, reason: 'persist-failed' };
       }
 

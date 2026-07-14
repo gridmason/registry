@@ -43,12 +43,31 @@ fails CI.
 | FR-4 | Self-review waiver used (SPEC §4a) | `review.waiver` | reviewer |
 | FR-4 | Human verdict denied | `review.denied` | reviewer / `anonymous` |
 | FR-5 | Countersignature applied | `release.countersigned` | `registry:countersign` |
-| FR-5 | Release anchored in the transparency log | `release.logged` | `registry:countersign` |
+| FR-5 | Release anchored in the transparency log **and** persisted (published) | `release.logged` | `registry:countersign` |
 | FR-5 | Transparency-log append failed after retries (#38) | `release.log_failed` | `registry:countersign` |
+| FR-5 | Release doc could not be persisted after signing + logging (#38) | `release.persist_failed` | `registry:countersign` |
 | FR-8 | Revoke | `artifact.revoked` | operator |
 | FR-8 | Kill | `artifact.killed` | operator |
 | FR-8 | Ops action denied | `ops.denied` | operator / `anonymous` |
 | — | Service start | `service.start` | `system` |
+
+### Countersign (FR-5) event semantics
+
+The countersign stage emits `release.countersigned` at the moment of **signing** —
+it records the signing *act*, not publication — and only later emits
+`release.logged` once the release is both anchored in the transparency log **and**
+persisted (i.e. actually published). So `release.countersigned` without a following
+`release.logged` is expected and unambiguous: exactly one of two failure events
+then explains why publication did not complete —
+
+- `release.log_failed` — the transparency-log append failed after bounded retries;
+- `release.persist_failed` — the append succeeded but the release doc did not persist.
+
+Either failure leaves the artifact **approved-but-unpublished** (no release doc);
+the re-drive endpoint (below / see `docs/config.md`) picks up any approved artifact
+lacking a release doc and completes it. The two failure events cover every
+non-published outcome, so the trail is never silent about a signed-but-unpublished
+artifact.
 
 ### Read surfaces emit no per-request event
 

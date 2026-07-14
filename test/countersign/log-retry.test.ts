@@ -124,6 +124,35 @@ describe('transparency-log append retry (#38)', () => {
     expect(actions).not.toContain('release.logged');
   });
 
+  it('audits release.persist_failed when the release doc cannot be persisted', async () => {
+    const publisher = await makePublisherFixture();
+    // A release-doc store whose create always fails: the signature + log entry
+    // exist, but persistence does not, so the artifact is approved-unpublished.
+    const releaseDocStore = new InMemoryReleaseDocStore();
+    releaseDocStore.create = () => Promise.reject(new Error('db down'));
+    const stage = createCountersignStage({
+      identity: identity(),
+      transparencyLog: new InMemoryTransparencyLog('registry.test'),
+      releaseDocStore,
+      logAppendRetry: { maxAttempts: 3, baseDelayMs: 0 },
+    });
+
+    const result = await stage.run({
+      artifact: artifactRecord({ envelope: publisher.publisherEnvelope, contentHashes: publisher.files }),
+      waiverUsed: false,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('persist-failed');
+    const actions = events.map((e) => e.action);
+    // The signing act and the log anchoring both happened and are audited; only
+    // persistence failed, and that failure is now audited too (no silent gap).
+    expect(actions).toContain('release.countersigned');
+    expect(actions).toContain('release.persist_failed');
+    expect(actions).not.toContain('release.logged');
+  });
+
   it('re-drives an approved-unpublished artifact to completion once the log recovers', async () => {
     const publisher = await makePublisherFixture({ artifactId: 'acme-clock@1.2.0' });
     const artifactStore = new InMemoryArtifactStore();
