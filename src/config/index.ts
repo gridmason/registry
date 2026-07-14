@@ -30,6 +30,38 @@ const LOG_LEVELS: readonly LogLevel[] = [
 
 const NODE_ENVS: readonly NodeEnv[] = ['development', 'production', 'test'];
 
+/** Postgres connection settings (records, review queue, audit log). */
+export interface PostgresConfig {
+  /** libpq-style connection URL. */
+  readonly url: string;
+  /** Maximum number of pooled connections. */
+  readonly poolMax: number;
+  /** Milliseconds to wait for a connection from the pool before failing. */
+  readonly connectionTimeoutMs: number;
+}
+
+/** S3-compatible object-store settings (artifacts, release docs, feeds). */
+export interface ObjectStoreConfig {
+  /**
+   * Service endpoint, e.g. `http://localhost:9000` for MinIO. Empty means the
+   * AWS SDK resolves the endpoint from the region (real S3).
+   */
+  readonly endpoint: string;
+  /** Region sent with every request (S3-compatible stores still require one). */
+  readonly region: string;
+  /** Bucket that holds all registry objects. */
+  readonly bucket: string;
+  /** Access key id; empty falls back to the SDK's default credential chain. */
+  readonly accessKeyId: string;
+  /** Secret access key; empty falls back to the SDK's default credential chain. */
+  readonly secretAccessKey: string;
+  /**
+   * Path-style addressing (`endpoint/bucket/key`). Required for MinIO and most
+   * self-hosted S3 stores; real AWS S3 uses virtual-host style (`false`).
+   */
+  readonly forcePathStyle: boolean;
+}
+
 export interface Config {
   /** Deployment mode; influences defaults and (later) error verbosity. */
   readonly nodeEnv: NodeEnv;
@@ -48,6 +80,10 @@ export interface Config {
   readonly requestIdHeader: string;
   /** Grace period for in-flight requests to drain on shutdown before force-exit. */
   readonly shutdownTimeoutMs: number;
+  /** Postgres connection settings. */
+  readonly postgres: PostgresConfig;
+  /** S3-compatible object-store settings. */
+  readonly objectStore: ObjectStoreConfig;
 }
 
 class ConfigError extends Error {
@@ -83,6 +119,15 @@ function readInt(
   return parsed;
 }
 
+function readBool(env: Env, key: string, fallback: boolean): boolean {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return fallback;
+  const normalized = raw.toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  throw new ConfigError(`${key} must be a boolean (true/false), got "${raw}"`);
+}
+
 function readEnum<T extends string>(
   env: Env,
   key: string,
@@ -113,6 +158,33 @@ export function loadConfig(env: Env = process.env): Config {
       min: 0,
       max: 300_000,
     }),
+    postgres: {
+      // Default targets the local dev compose (see compose.yaml). Production
+      // deployments always set DATABASE_URL explicitly.
+      url: readString(
+        env,
+        'DATABASE_URL',
+        'postgres://gridmason:gridmason@localhost:5432/gridmason',
+      ),
+      poolMax: readInt(env, 'DATABASE_POOL_MAX', 10, { min: 1, max: 1000 }),
+      connectionTimeoutMs: readInt(env, 'DATABASE_CONNECTION_TIMEOUT_MS', 5_000, {
+        min: 0,
+        max: 120_000,
+      }),
+    },
+    objectStore: {
+      // Defaults target the local dev compose MinIO instance.
+      endpoint: readString(env, 'OBJECT_STORE_ENDPOINT', 'http://localhost:9000'),
+      region: readString(env, 'OBJECT_STORE_REGION', 'us-east-1'),
+      bucket: readString(env, 'OBJECT_STORE_BUCKET', 'gridmason-registry'),
+      accessKeyId: readString(env, 'OBJECT_STORE_ACCESS_KEY_ID', 'gridmason'),
+      secretAccessKey: readString(
+        env,
+        'OBJECT_STORE_SECRET_ACCESS_KEY',
+        'gridmason-dev-secret',
+      ),
+      forcePathStyle: readBool(env, 'OBJECT_STORE_FORCE_PATH_STYLE', true),
+    },
   };
 }
 

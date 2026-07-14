@@ -17,17 +17,27 @@ import {
   type ReadinessRegistry,
 } from './http/readiness.js';
 import type { Logger } from './logging/index.js';
+import { registerStorageProbes, type Storage } from './storage/index.js';
 
 export interface BuildServerOptions {
   config: Config;
   logger: Logger;
   /** Override the readiness registry (tests inject their own). */
   readiness?: ReadinessRegistry;
+  /**
+   * Storage bundle. When provided, its Postgres and object-store liveness
+   * replace the skeleton's placeholder `storage` readiness probe.
+   */
+  storage?: Storage;
 }
 
 export async function buildServer(options: BuildServerOptions) {
   const { config, logger } = options;
   const readiness = options.readiness ?? createDefaultReadinessRegistry();
+
+  if (options.storage) {
+    registerStorageProbes(readiness, options.storage);
+  }
 
   const app = Fastify({
     loggerInstance: logger,

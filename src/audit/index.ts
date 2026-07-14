@@ -49,6 +49,15 @@ export const noopAuditSink: AuditSink = {
   },
 };
 
+/** Fan an event out to several sinks (e.g. log it *and* persist it). */
+export function combineAuditSinks(...sinks: readonly AuditSink[]): AuditSink {
+  return {
+    emit(event) {
+      for (const sink of sinks) sink.emit(event);
+    },
+  };
+}
+
 /** A sink that writes each event as one structured log line at `info`. */
 export function loggerAuditSink(logger: Logger): AuditSink {
   return {

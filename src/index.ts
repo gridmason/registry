@@ -3,18 +3,34 @@
  * listening, and shut down gracefully on signal.
  */
 import { loadConfig } from './config/index.js';
-import { emitAuditEvent, loggerAuditSink, setAuditSink } from './audit/index.js';
+import {
+  combineAuditSinks,
+  emitAuditEvent,
+  loggerAuditSink,
+  setAuditSink,
+} from './audit/index.js';
+import { createPostgresAuditSink } from './audit/postgres-sink.js';
 import { createLogger } from './logging/index.js';
 import { buildServer } from './server.js';
+import { createStorage } from './storage/index.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config);
 
-  // Route audit events to the structured log until a durable sink lands (#3).
-  setAuditSink(loggerAuditSink(logger));
+  const storage = createStorage(config);
 
-  const app = await buildServer({ config, logger });
+  // Audit events are both logged (observability) and persisted to Postgres
+  // (durable record, FR-12). The DB write is best-effort and never blocks the
+  // transition that produced the event.
+  setAuditSink(
+    combineAuditSinks(
+      loggerAuditSink(logger),
+      createPostgresAuditSink(storage.postgres, logger),
+    ),
+  );
+
+  const app = await buildServer({ config, logger, storage });
 
   let shuttingDown = false;
   const shutdown = (signal: NodeJS.Signals): void => {
@@ -30,6 +46,7 @@ async function main(): Promise<void> {
 
     app
       .close()
+      .then(() => storage.close())
       .then(() => {
         logger.info('shutdown complete');
         process.exit(0);
