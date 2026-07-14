@@ -25,6 +25,7 @@ import { createPostgresReleaseDocStore, type ReleaseDocStore } from './release/s
 import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
+import { resolutionRoutes } from './http/resolution.js';
 import { servingRoutes } from './http/serving.js';
 import { publisherRoutes } from './http/publisher.js';
 import { reviewRoutes } from './http/review.js';
@@ -198,6 +199,22 @@ export async function buildServer(options: BuildServerOptions) {
         registryId: config.registryId,
         verifier,
         reviewStage,
+      });
+    }
+
+    // Resolution API (#13, FR-7/FR-10): the anonymous gate-snapshot → import-map
+    // fragment surface. It maps enabled (publisher, tag, version) remotes to
+    // hash-pinned serving URLs + signature bundles, so it needs the publisher,
+    // artifact, release-doc, and object stores together. Like serving it sits off
+    // the control plane and mounts once all four are wired; it reuses the serving
+    // block's release-doc store so both read the same published releases.
+    if (artifactStore && objectStore && servingReleaseDocStore) {
+      await app.register(resolutionRoutes, {
+        publisherStore,
+        artifactStore,
+        releaseDocStore: servingReleaseDocStore,
+        objectStore,
+        registryId: config.registryId,
       });
     }
 
