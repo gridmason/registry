@@ -43,6 +43,28 @@ import type { CountersignIdentity } from './identity.js';
  */
 export const COUNTERSIGN_ACTOR = 'registry:countersign';
 
+/**
+ * Bounded retry policy for the transparency-log append (#38). The public Rekor
+ * endpoint can fail transiently; rather than dropping the release on the first
+ * error, the append is retried a few times with exponential backoff before the
+ * stage gives up and records an audited failure. Defaults: 3 attempts, 100 ms base
+ * (100/200 ms backoffs) — small enough to stay within a request, generous enough to
+ * ride out a blip. Tests inject `{ maxAttempts, baseDelayMs: 0 }` to avoid real waits.
+ */
+export interface LogAppendRetryPolicy {
+  /** Total attempts (≥ 1). The first try is attempt 1; retries follow on failure. */
+  readonly maxAttempts: number;
+  /** Base backoff in ms; the delay before retry N is `baseDelayMs * 2^(N-1)`. */
+  readonly baseDelayMs: number;
+}
+
+const DEFAULT_LOG_APPEND_RETRY: LogAppendRetryPolicy = { maxAttempts: 3, baseDelayMs: 100 };
+
+/** Injectable sleep so tests skip real timers; defaults to a real timeout. */
+export type Sleep = (ms: number) => Promise<void>;
+
+const realSleep: Sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 export interface CountersignInput {
   /** The approved artifact (state already `approved` when this runs). */
   readonly artifact: ArtifactRecord;
@@ -71,6 +93,10 @@ export interface CountersignStageDeps {
   readonly transparencyLog: TransparencyLog;
   readonly releaseDocStore: ReleaseDocStore;
   readonly logger?: Logger;
+  /** Transparency-log append retry policy (#38). Defaults to {@link DEFAULT_LOG_APPEND_RETRY}. */
+  readonly logAppendRetry?: LogAppendRetryPolicy;
+  /** Sleep between retries; defaults to a real timer. Tests inject a no-op. */
+  readonly sleep?: Sleep;
 }
 
 export interface CountersignStage {
@@ -85,6 +111,41 @@ function hexHashesToBase64(hashes: readonly string[]): string[] {
 
 export function createCountersignStage(deps: CountersignStageDeps): CountersignStage {
   const { identity, transparencyLog, releaseDocStore, logger } = deps;
+  const retry = deps.logAppendRetry ?? DEFAULT_LOG_APPEND_RETRY;
+  const sleep = deps.sleep ?? realSleep;
+
+  /**
+   * Append to the transparency log, retrying transient failures with bounded
+   * exponential backoff (#38). Returns the append result, or `null` when every
+   * attempt failed — the caller then records an audited failure and leaves the
+   * artifact approved-but-unpublished for the re-drive path.
+   */
+  async function appendWithRetry(
+    input: Parameters<TransparencyLog['append']>[0],
+    artifactId: string,
+  ): Promise<Awaited<ReturnType<TransparencyLog['append']>> | null> {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
+      try {
+        return await transparencyLog.append(input);
+      } catch (err) {
+        lastErr = err;
+        if (attempt < retry.maxAttempts) {
+          const delayMs = retry.baseDelayMs * 2 ** (attempt - 1);
+          logger?.warn(
+            { artifactId, attempt, maxAttempts: retry.maxAttempts, delayMs, err },
+            'countersign: transparency-log append failed; retrying',
+          );
+          await sleep(delayMs);
+        }
+      }
+    }
+    logger?.error(
+      { artifactId, attempts: retry.maxAttempts, err: lastErr },
+      'countersign: transparency-log append failed after retries; release not published',
+    );
+    return null;
+  }
 
   return {
     async run(input) {
@@ -125,24 +186,25 @@ export function createCountersignStage(deps: CountersignStageDeps): CountersignS
         releaseHash,
         waiver: waiverUsed,
       });
-      let logEntry: TransparencyLogEntry;
-      let logRef: string;
-      try {
-        const appended = await transparencyLog.append({
+      const appended = await appendWithRetry(
+        {
           body: leaf,
           releaseHash,
           signatureB64: countersigned.registrySig.sig,
           certificateB64: countersigned.registrySig.cert,
-        });
-        logEntry = appended.entry;
-        logRef = appended.logRef;
-      } catch (err) {
-        logger?.error(
-          { artifactId: artifact.id, err },
-          'countersign: transparency-log append failed; release not published',
-        );
+        },
+        artifact.id,
+      );
+      if (!appended) {
+        // Every append attempt failed. The artifact is already `approved`; it stays
+        // approved-but-unpublished (no release doc), and the failure is audited so
+        // it is visible rather than silent — the re-drive path (`redriveRelease`)
+        // completes it once the log recovers. (FR-12, #38.)
+        emitAuditEvent(COUNTERSIGN_ACTOR, 'release.log_failed', publisherEnvelope.subject.artifact);
         return { ok: false, reason: 'log-append-failed' };
       }
+      const logEntry: TransparencyLogEntry = appended.entry;
+      const logRef: string = appended.logRef;
 
       // 5. Complete the envelope with the log-inclusion transport.
       const envelope: SignatureEnvelope = {

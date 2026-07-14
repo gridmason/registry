@@ -75,6 +75,23 @@ stage does not mount and approvals record a verdict without publishing a release
 | `TRANSPARENCY_LOG_DRIVER` | `memory` | `rekor` for the real Sigstore/Rekor HTTP client (production, GW-D17); `memory` for the in-process RFC 6962 log (dev + tests). |
 | `TRANSPARENCY_LOG_REKOR_URL` | `https://rekor.sigstore.dev` | Base URL of the Rekor instance when the driver is `rekor`. |
 | `TRANSPARENCY_LOG_ORIGIN` | *(the `REGISTRY_ID`)* | The transparency log's checkpoint `origin` line (its identity in signed tree heads). Defaults to this registry's id so a self-hosted `memory` log names itself. |
+| `TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION` | `false` | Escape hatch to run the non-durable `memory` log with `NODE_ENV=production`. See the boot rule below. |
+
+> **Boot rule (#38):** `NODE_ENV=production` with `TRANSPARENCY_LOG_DRIVER=memory`
+> is **refused at boot** — the in-process log is not durable and anchors to nothing
+> public, so a production instance that forgot to set `rekor` would silently skip the
+> public anchoring FR-5 promises. Set `TRANSPARENCY_LOG_DRIVER=rekor`, or, if a
+> self-host operator deliberately accepts running a production-mode process with no
+> public log, set `TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION=true` to override.
+> Outside production the `memory` log stays the zero-config default and only logs a
+> boot warning.
+
+If `transparencyLog.append` fails at approval time, the countersign stage retries
+with bounded backoff; if every attempt fails it records an audited `release.log_failed`
+event and leaves the artifact **approved-but-unpublished** (no release document). An
+operator completes it once the log recovers via the re-drive endpoint
+`POST /v1/ops/artifacts/:id/redrive-release` (operator-gated; idempotent — an artifact
+that already has a release doc returns `409 already_released`).
 
 ## Revocation & kill feed
 
