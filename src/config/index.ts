@@ -40,6 +40,18 @@ export interface PostgresConfig {
   readonly connectionTimeoutMs: number;
 }
 
+/** OIDC identity settings (SPEC §2 — the issuer is the trust anchor). */
+export interface OidcConfig {
+  /**
+   * Allowlist of trusted OIDC issuer URLs. A publisher registration's bearer
+   * token is accepted only when its `iss` claim is one of these; a token from
+   * any other issuer is refused. Empty means no issuer is trusted, so no
+   * publisher can register (fail closed) — an instance must configure at least
+   * one issuer before it accepts registrations.
+   */
+  readonly issuerAllowlist: readonly string[];
+}
+
 /** S3-compatible object-store settings (artifacts, release docs, feeds). */
 export interface ObjectStoreConfig {
   /**
@@ -80,6 +92,14 @@ export interface Config {
   readonly requestIdHeader: string;
   /** Grace period for in-flight requests to drain on shutdown before force-exit. */
   readonly shutdownTimeoutMs: number;
+  /**
+   * This instance's source-qualified registry id (SPEC §9). Every output that
+   * carries publisher identity is qualified with it so hosts resolve by
+   * `(registry, publisher, tag)`; prefixes are unique only within this id.
+   */
+  readonly registryId: string;
+  /** OIDC identity settings. */
+  readonly oidc: OidcConfig;
   /** Postgres connection settings. */
   readonly postgres: PostgresConfig;
   /** S3-compatible object-store settings. */
@@ -117,6 +137,15 @@ function readInt(
     throw new ConfigError(`${key} must be between ${min} and ${max}, got ${parsed}`);
   }
   return parsed;
+}
+
+function readStringList(env: Env, key: string, fallback: readonly string[]): string[] {
+  const raw = env[key];
+  if (raw === undefined || raw === '') return [...fallback];
+  return raw
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry !== '');
 }
 
 function readBool(env: Env, key: string, fallback: boolean): boolean {
@@ -158,6 +187,12 @@ export function loadConfig(env: Env = process.env): Config {
       min: 0,
       max: 300_000,
     }),
+    // Neutral local default; production sets this to the instance's canonical id
+    // (e.g. registry.gridmason.dev), which becomes the widget `source` string.
+    registryId: readString(env, 'REGISTRY_ID', 'registry.local'),
+    oidc: {
+      issuerAllowlist: readStringList(env, 'OIDC_ISSUER_ALLOWLIST', []),
+    },
     postgres: {
       // Default targets the local dev compose (see compose.yaml). Production
       // deployments always set DATABASE_URL explicitly.
