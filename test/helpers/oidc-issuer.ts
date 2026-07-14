@@ -30,6 +30,12 @@ export interface FakeIssuer {
    * and the signature fails to verify.
    */
   signWithWrongKey(claims: ClaimSet): Promise<string>;
+  /**
+   * Sign with the published key but stamp a `kid` that is NOT in the JWKS. jose
+   * finds no matching key and (cooldown permitting) refetches the JWKS trying to
+   * — the path a bad token uses to drive network load.
+   */
+  signWithUnknownKid(claims: ClaimSet): Promise<string>;
   /** Sign with HS256 (a symmetric alg the verifier must refuse: alg-confusion). */
   signHs256(claims: ClaimSet, secret: string): Promise<string>;
   /** Build an unsecured `alg: none` token (no signature) the verifier must refuse. */
@@ -38,6 +44,14 @@ export interface FakeIssuer {
   failDiscovery(status: number | null): void;
   /** Force the JWKS endpoint to fail with this status (null = serve normally). */
   failJwks(status: number | null): void;
+  /** Make discovery reply `302` to this `Location` (null = serve normally). */
+  redirectDiscovery(location: string | null): void;
+  /** Make JWKS reply `302` to this `Location` (null = serve normally). */
+  redirectJwks(location: string | null): void;
+  /** How many times the discovery endpoint has been hit (all outcomes). */
+  discoveryHits(): number;
+  /** How many times the JWKS endpoint has been hit (all outcomes). */
+  jwksHits(): number;
   close(): Promise<void>;
 }
 
@@ -52,11 +66,20 @@ export async function startFakeIssuer(): Promise<FakeIssuer> {
 
   let discoveryStatus: number | null = null;
   let jwksStatus: number | null = null;
+  let discoveryRedirect: string | null = null;
+  let jwksRedirect: string | null = null;
+  let discoveryCount = 0;
+  let jwksCount = 0;
   let issuer = '';
 
   const server: Server = createServer((req: IncomingMessage, res: ServerResponse) => {
     const url = req.url ?? '';
     if (url === '/.well-known/openid-configuration') {
+      discoveryCount += 1;
+      if (discoveryRedirect !== null) {
+        res.writeHead(302, { location: discoveryRedirect }).end();
+        return;
+      }
       if (discoveryStatus !== null) {
         res.writeHead(discoveryStatus).end('discovery unavailable');
         return;
@@ -66,6 +89,11 @@ export async function startFakeIssuer(): Promise<FakeIssuer> {
       return;
     }
     if (url === '/jwks') {
+      jwksCount += 1;
+      if (jwksRedirect !== null) {
+        res.writeHead(302, { location: jwksRedirect }).end();
+        return;
+      }
       if (jwksStatus !== null) {
         res.writeHead(jwksStatus).end('jwks unavailable');
         return;
@@ -89,6 +117,10 @@ export async function startFakeIssuer(): Promise<FakeIssuer> {
     kid: KID,
     sign: (claims) => signWith(signing.privateKey, claims),
     signWithWrongKey: (claims) => signWith(wrong.privateKey, claims),
+    signWithUnknownKid: (claims) =>
+      new SignJWT(claims)
+        .setProtectedHeader({ alg: ALG, kid: 'unknown-kid' })
+        .sign(signing.privateKey),
     signHs256: (claims, secret) =>
       new SignJWT(claims)
         .setProtectedHeader({ alg: 'HS256', kid: KID })
@@ -101,6 +133,14 @@ export async function startFakeIssuer(): Promise<FakeIssuer> {
     failJwks: (status) => {
       jwksStatus = status;
     },
+    redirectDiscovery: (location) => {
+      discoveryRedirect = location;
+    },
+    redirectJwks: (location) => {
+      jwksRedirect = location;
+    },
+    discoveryHits: () => discoveryCount,
+    jwksHits: () => jwksCount,
     close: () =>
       new Promise<void>((resolve, reject) =>
         server.close((err) => (err ? reject(err) : resolve())),

@@ -61,6 +61,11 @@ export async function buildServer(options: BuildServerOptions) {
     // logger under `reqId`.
     requestIdHeader: config.requestIdHeader,
     genReqId: () => randomUUID(),
+    // Explicit transport caps rather than Node/Fastify defaults: bound the body
+    // an unauthenticated caller can make us buffer, and the total header block
+    // size at the underlying HTTP server (bearer tokens ride in a header).
+    bodyLimit: config.http.bodyLimitBytes,
+    http: { maxHeaderSize: config.http.maxHeaderSizeBytes },
   });
 
   // Echo the correlation id back so callers can stitch client and server logs.

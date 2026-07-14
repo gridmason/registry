@@ -15,6 +15,8 @@ boot immediately with a descriptive `ConfigError` rather than surfacing later.
 | `REQUEST_ID_HEADER` | `x-request-id` | Inbound/outbound header carrying the request correlation id. If a request arrives with this header set, its value is adopted as the request id; otherwise a UUID is generated. The id is echoed back on the response and bound to every log line as `reqId`. Compared case-insensitively. |
 | `SHUTDOWN_TIMEOUT_MS` | `10000` | Grace period (ms) for in-flight requests to drain on `SIGTERM`/`SIGINT` before the process force-exits (0–300000). |
 | `REGISTRY_ID` | `registry.local` | This instance's source-qualified registry id (SPEC §9). Every output carrying publisher identity is qualified with it so hosts resolve `(registry, publisher, tag)` and pin each prefix to one registry. Production sets it to the instance's canonical id (e.g. `registry.gridmason.dev`). |
+| `HTTP_BODY_LIMIT_BYTES` | `65536` | Maximum accepted request body size, in bytes (1024–10485760). The control-plane API takes only small JSON bodies, so this sits well below Fastify's 1 MiB default to bound the memory an unauthenticated caller can force the service to buffer. |
+| `HTTP_MAX_HEADER_SIZE_BYTES` | `16384` | Maximum total request header block size, in bytes (8192–1048576), applied at the underlying Node HTTP server. Comfortably above an 8 KiB bearer token plus ordinary headers, but bounded so oversized header floods are rejected early. |
 
 ## Identity (OIDC)
 
@@ -23,7 +25,7 @@ anchor** (SPEC §2). See [`api/publisher.md`](api/publisher.md).
 
 | Variable | Default | Description |
 |---|---|---|
-| `OIDC_ISSUER_ALLOWLIST` | *(empty)* | Comma-separated list of trusted OIDC issuer URLs. A registration's bearer token is accepted only when its `iss` claim is one of these. **Empty means no issuer is trusted, so no publisher can register (fail closed)** — an instance must set at least one issuer before it accepts registrations. |
+| `OIDC_ISSUER_ALLOWLIST` | *(empty)* | Comma-separated list of trusted OIDC issuer URLs. A registration's bearer token is accepted only when its `iss` claim is one of these. **Empty means no issuer is trusted, so no publisher can register (fail closed)** — an instance must set at least one issuer before it accepts registrations. Each entry is **validated at boot**: it must be a well-formed absolute `https://` URL (plain `http://` is permitted only for a loopback host, for local dev). A malformed or insecure entry fails startup with a `ConfigError` rather than surfacing later as a discovery failure at first registration. |
 | `OIDC_AUDIENCE` | *(empty)* | Required token audience (`aud`). When set, a registration token is accepted only if its `aud` claim includes this value; empty means the audience is not checked. Set it to this registry's canonical id so a token minted for a different relying party cannot be replayed here. |
 
 > The registration token's **signature is verified** against the issuer's
@@ -35,6 +37,16 @@ anchor** (SPEC §2). See [`api/publisher.md`](api/publisher.md).
 > refused (alg-confusion guard) — and `exp`/`nbf` are enforced. If the issuer's
 > discovery or JWKS endpoint cannot be reached, verification **fails closed** and
 > the request is rejected (HTTP `503`), never accepted unverified.
+>
+> Additional transport hardening on the verification path: neither the discovery
+> nor the JWKS fetch **follows HTTP redirects** (`redirect: 'error'`), so a
+> compromised or misconfigured allowlisted issuer cannot bounce the request to an
+> internal address (e.g. cloud metadata). A bearer token longer than **8 KiB** is
+> rejected before it is decoded. Repeated verifications for an issuer the registry
+> **cannot reach** back off in-process (a short, growing window) so invalid-token
+> spam cannot drive unbounded discovery/JWKS traffic, and a small in-process cache
+> of recent *definite* verification failures short-circuits an identical spammed
+> token without re-verifying it.
 
 ## Storage
 
