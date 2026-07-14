@@ -16,6 +16,13 @@ import {
 } from './artifact/store.js';
 import { createOidcVerifier, type OidcVerifier } from './auth/oidc.js';
 import type { Config } from './config/index.js';
+import {
+  createCountersignStage,
+  loadCountersignIdentity,
+  type CountersignIdentity,
+} from './countersign/index.js';
+import { createPostgresReleaseDocStore, type ReleaseDocStore } from './release/store.js';
+import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
 import { publisherRoutes } from './http/publisher.js';
@@ -67,6 +74,23 @@ export interface BuildServerOptions {
    * omit it to exercise intake without review).
    */
   reviewCaseStore?: ReviewCaseStore;
+  /**
+   * Release-document store backing the countersign stage (#10). Defaults to a
+   * Postgres-backed store over `storage.postgres`; tests inject an in-memory store.
+   */
+  releaseDocStore?: ReleaseDocStore;
+  /**
+   * Transparency log the countersign stage anchors releases in. Defaults to the
+   * one named by `config.transparencyLog` (Rekor in production, an in-process log
+   * in dev); tests inject the in-process log to read back its checkpoint key.
+   */
+  transparencyLog?: TransparencyLog;
+  /**
+   * Registry countersign identity (the separately-held key, SPEC §2). Defaults to
+   * one loaded from `config.countersign`; when neither this nor config provides a
+   * key, the countersign stage does not mount and approvals do not publish a release.
+   */
+  countersignIdentity?: CountersignIdentity;
   /**
    * OIDC verifier backing publisher registration and publish intake. Defaults to
    * one built from `config.oidc` (real discovery + JWKS). Tests inject a verifier
@@ -165,11 +189,40 @@ export async function buildServer(options: BuildServerOptions) {
     // reviewer≠author). It shares the one verifier; the reviewer set + waiver are
     // config. No object store is required — verdicts move state, not bytes.
     if (artifactStore && reviewCaseStore) {
+      // The countersign + transparency-logging stage (#10) runs on approval. It
+      // mounts only when a separately-held countersign key is configured and a
+      // release-doc store is available; otherwise an approval simply records the
+      // verdict without publishing a release (the Phase-A author-loop demo shape).
+      const countersignIdentity =
+        options.countersignIdentity ?? loadCountersignIdentity(config.countersign);
+      const releaseDocStore =
+        options.releaseDocStore ??
+        (options.storage
+          ? createPostgresReleaseDocStore(options.storage.postgres)
+          : undefined);
+      let onApprove: Parameters<typeof createHumanReviewLane>[0]['onApprove'];
+      if (countersignIdentity && releaseDocStore) {
+        const transparencyLog =
+          options.transparencyLog ?? createTransparencyLog(config.transparencyLog);
+        const stage = createCountersignStage({
+          identity: countersignIdentity,
+          transparencyLog,
+          releaseDocStore,
+          logger,
+        });
+        // The stage records its own faults; the hook resolves void so a publish
+        // failure never unwinds the already-committed approval.
+        onApprove = async (outcome) => {
+          await stage.run({ artifact: outcome.artifact, waiverUsed: outcome.waiverUsed });
+        };
+      }
+
       const lane = createHumanReviewLane({
         artifactStore,
         reviewCaseStore,
         publisherStore,
         selfReviewWaiver: config.review.selfReviewWaiver,
+        onApprove,
       });
       await app.register(reviewRoutes, {
         lane,

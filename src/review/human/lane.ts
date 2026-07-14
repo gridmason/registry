@@ -71,6 +71,15 @@ export interface HumanReviewLaneDeps {
   readonly publisherStore: PublisherStore;
   /** The disclosed flagship self-review waiver (SPEC §4a); off for self-host. */
   readonly selfReviewWaiver: boolean;
+  /**
+   * Invoked after a successful **approval** (the `reviewing → approved`
+   * transition), to run the countersign + transparency-logging stage (#10). Only
+   * fires on approve — a rejected artifact is never countersigned. Optional: an
+   * instance with no countersign key configured (e.g. the Phase-A author-loop
+   * demo) omits it and approvals simply do not publish a release. The hook owns
+   * its own failures; a throw here never unwinds the already-committed verdict.
+   */
+  readonly onApprove?: (outcome: VerdictOutcome) => Promise<void>;
 }
 
 /** A pending case surfaced by the queue: the case plus its artifact. */
@@ -89,7 +98,7 @@ export interface HumanReviewLane {
 }
 
 export function createHumanReviewLane(deps: HumanReviewLaneDeps): HumanReviewLane {
-  const { artifactStore, reviewCaseStore, publisherStore, selfReviewWaiver } = deps;
+  const { artifactStore, reviewCaseStore, publisherStore, selfReviewWaiver, onApprove } = deps;
 
   return {
     async listQueue() {
@@ -181,7 +190,21 @@ export function createHumanReviewLane(deps: HumanReviewLaneDeps): HumanReviewLan
       }
       emitAuditEvent(reviewerId, `review.${target}`, artifact.id);
 
-      return { ok: true, outcome: { reviewCase: decided, artifact: moved, waiverUsed } };
+      const outcome: VerdictOutcome = { reviewCase: decided, artifact: moved, waiverUsed };
+
+      // On approval, run the countersign + transparency-logging stage (#10). The
+      // verdict has already committed; the hook owns its own errors, so a failure
+      // to publish never turns the recorded approval into a request failure.
+      if (target === 'approved' && onApprove) {
+        try {
+          await onApprove(outcome);
+        } catch {
+          // Defensive: the hook is expected not to throw (it logs its own faults);
+          // swallow anything that escapes so the committed verdict still returns.
+        }
+      }
+
+      return { ok: true, outcome };
     },
   };
 }

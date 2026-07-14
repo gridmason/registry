@@ -60,6 +60,22 @@ phase (SCOPE cut).
 | `REVIEW_REVIEWER_IDENTITIES` | *(empty)* | Comma-separated list of the OIDC identities permitted to submit a verdict, each in the canonical composite form `<url-encoded-issuer> <url-encoded-subject>` (what `composeOidcIdentity` produces — the same string the audit log and publisher records key on, e.g. `https%3A%2F%2Fissuer.example reviewer-1`). Percent-encoding leaves no literal comma in an entry, so the comma-separated list is unambiguous. **Empty means no identity can review (fail closed).** |
 | `REVIEW_SELF_REVIEW_WAIVER` | `false` | The disclosed flagship self-review waiver (SPEC §4a): when `true`, an operator who authored an artifact may also review it (separation of duties waived while the flagship is single-rostered), the use is recorded on the review case and gets its own audit event so the release can be flagged. **Off by default and never enabled on a self-host instance** — every self-hoster keeps reviewer≠author. |
 
+## Countersign + transparency logging
+
+The registry countersignature key is **held separately from review staff**
+(SPEC §2, §4a) — its own custody-controlled config fields, distinct from the
+reviewer roster above. See [`countersign.md`](countersign.md) for key custody and
+the Sigstore public-instance evaluation. When no key is configured the countersign
+stage does not mount and approvals record a verdict without publishing a release.
+
+| Variable | Default | Description |
+|---|---|---|
+| `COUNTERSIGN_PRIVATE_KEY` | *(empty)* | PEM PKCS#8 **ECDSA P-256** private key the registry countersigns approved artifacts with. Sourced from a custody-controlled secret — never a reviewer credential. A single-line value may `\n`-escape its newlines. A configured-but-unusable key fails at boot; empty means no countersign stage. |
+| `COUNTERSIGN_CERTIFICATE` | *(empty)* | PEM X.509 (P-256 leaf) certificate carried in the countersignature envelope; hosts pin its issuing root as a countersign root. Must match `COUNTERSIGN_PRIVATE_KEY`. |
+| `TRANSPARENCY_LOG_DRIVER` | `memory` | `rekor` for the real Sigstore/Rekor HTTP client (production, GW-D17); `memory` for the in-process RFC 6962 log (dev + tests). |
+| `TRANSPARENCY_LOG_REKOR_URL` | `https://rekor.sigstore.dev` | Base URL of the Rekor instance when the driver is `rekor`. |
+| `TRANSPARENCY_LOG_ORIGIN` | *(the `REGISTRY_ID`)* | The transparency log's checkpoint `origin` line (its identity in signed tree heads). Defaults to this registry's id so a self-hosted `memory` log names itself. |
+
 ## Storage
 
 Records, the review queue, and the audit log live in **Postgres**; artifacts,

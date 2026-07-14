@@ -22,6 +22,15 @@ describe('loadConfig', () => {
         reviewerIdentities: [],
         selfReviewWaiver: false,
       },
+      countersign: {
+        privateKeyPem: '',
+        certificatePem: '',
+      },
+      transparencyLog: {
+        driver: 'memory',
+        rekorUrl: 'https://rekor.sigstore.dev',
+        origin: 'registry.local',
+      },
       http: {
         bodyLimitBytes: 65_536,
         maxHeaderSizeBytes: 16_384,
@@ -106,6 +115,40 @@ describe('loadConfig', () => {
     expect(loadConfig({ OIDC_AUDIENCE: 'registry.example.com' }).oidc.audience).toBe(
       'registry.example.com',
     );
+  });
+
+  it('reads the countersign key from custody env vars, unescaping newlines', () => {
+    const config = loadConfig({
+      COUNTERSIGN_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nMIIB\\n-----END PRIVATE KEY-----',
+      COUNTERSIGN_CERTIFICATE: '-----BEGIN CERTIFICATE-----\nabc\n-----END CERTIFICATE-----',
+    });
+    // A single-line `\n`-escaped value is normalized back to real newlines.
+    expect(config.countersign.privateKeyPem).toContain('\nMIIB\n');
+    // A value with real newlines is passed through unchanged.
+    expect(config.countersign.certificatePem).toContain('\nabc\n');
+  });
+
+  it('defaults the transparency log to the in-process driver and names it after the registry', () => {
+    const config = loadConfig({ REGISTRY_ID: 'registry.example' });
+    expect(config.transparencyLog.driver).toBe('memory');
+    expect(config.transparencyLog.origin).toBe('registry.example');
+  });
+
+  it('reads the Rekor driver, url, and an explicit log origin', () => {
+    const config = loadConfig({
+      TRANSPARENCY_LOG_DRIVER: 'rekor',
+      TRANSPARENCY_LOG_REKOR_URL: 'https://rekor.example',
+      TRANSPARENCY_LOG_ORIGIN: 'log.example',
+    });
+    expect(config.transparencyLog).toEqual({
+      driver: 'rekor',
+      rekorUrl: 'https://rekor.example',
+      origin: 'log.example',
+    });
+  });
+
+  it('rejects an unknown transparency-log driver', () => {
+    expect(() => loadConfig({ TRANSPARENCY_LOG_DRIVER: 'sqlite' })).toThrow(ConfigError);
   });
 
   it('defaults the review lane to an empty reviewer set and the waiver off', () => {
