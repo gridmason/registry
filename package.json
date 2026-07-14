@@ -25,7 +25,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev": "tsx watch src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "policy:render": "tsx scripts/render-policy.ts",
+    "policy:check": "tsx scripts/render-policy.ts --check"
   },
   "dependencies": {
     "@gridmason/protocol": "^0.0.2",

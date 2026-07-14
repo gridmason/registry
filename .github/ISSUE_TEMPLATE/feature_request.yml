@@ -1,0 +1,50 @@
+name: Feature request
+description: Suggest an enhancement to the Gridmason Registry.
+labels: ["type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Registry behavior is bound by the engineering spec (`docs/SPEC.md`). Two
+        constraints worth knowing before you file: a registry is **supply chain,
+        never a control plane**, and wire formats live in
+        [`@gridmason/protocol`](https://github.com/gridmason/protocol), not here —
+        format changes belong in that repo.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / use case
+      description: What are you trying to do, and where does the current registry fall short?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to see? Sketch the behavior or API surface.
+    validations:
+      required: true
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who is this for?
+      options:
+        - Self-hosters running their own registry
+        - Publishers
+        - Hosts consuming a registry
+        - Registry operators / ops
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you weighed, and why this one.
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This does not require the registry to act as a control plane a host must phone.
+        - label: This does not require a wire-format change (or I will file that in gridmason/protocol).

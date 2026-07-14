@@ -1,0 +1,10 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/gridmason/registry/security/advisories/new
+    about: >-
+      Never report a suspected vulnerability as a public issue. A registry is
+      supply chain — use private advisories. See SECURITY.md.
+  - name: Ask a question / start a discussion
+    url: https://github.com/orgs/gridmason/discussions
+    about: For usage questions, self-hosting help, and open-ended ideas.

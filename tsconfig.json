@@ -12,6 +12,7 @@
     "verbatimModuleSyntax": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": true,
