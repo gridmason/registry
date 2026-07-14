@@ -13,6 +13,11 @@ describe('loadConfig', () => {
       serviceName: 'gridmason-registry',
       requestIdHeader: 'x-request-id',
       shutdownTimeoutMs: 10_000,
+      registryId: 'registry.local',
+      oidc: {
+        issuerAllowlist: [],
+        audience: '',
+      },
       postgres: {
         url: 'postgres://gridmason:gridmason@localhost:5432/gridmason',
         poolMax: 10,
@@ -73,6 +78,26 @@ describe('loadConfig', () => {
       secretAccessKey: 'secret',
       forcePathStyle: false,
     });
+  });
+
+  it('reads the registry id and parses the OIDC issuer allowlist', () => {
+    const config = loadConfig({
+      REGISTRY_ID: 'registry.example.com',
+      OIDC_ISSUER_ALLOWLIST: 'https://a.example , https://b.example',
+    });
+    expect(config.registryId).toBe('registry.example.com');
+    expect(config.oidc.issuerAllowlist).toEqual(['https://a.example', 'https://b.example']);
+  });
+
+  it('defaults the OIDC issuer allowlist to empty (fail closed)', () => {
+    expect(loadConfig({}).oidc.issuerAllowlist).toEqual([]);
+  });
+
+  it('reads the OIDC audience and defaults it to empty (unchecked)', () => {
+    expect(loadConfig({}).oidc.audience).toBe('');
+    expect(loadConfig({ OIDC_AUDIENCE: 'registry.example.com' }).oidc.audience).toBe(
+      'registry.example.com',
+    );
   });
 
   it('accepts 1/0 as booleans and rejects other strings', () => {

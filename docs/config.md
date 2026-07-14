@@ -14,6 +14,27 @@ boot immediately with a descriptive `ConfigError` rather than surfacing later.
 | `SERVICE_NAME` | `gridmason-registry` | Logical service name attached to every log line and health response. |
 | `REQUEST_ID_HEADER` | `x-request-id` | Inbound/outbound header carrying the request correlation id. If a request arrives with this header set, its value is adopted as the request id; otherwise a UUID is generated. The id is echoed back on the response and bound to every log line as `reqId`. Compared case-insensitively. |
 | `SHUTDOWN_TIMEOUT_MS` | `10000` | Grace period (ms) for in-flight requests to drain on `SIGTERM`/`SIGINT` before the process force-exits (0–300000). |
+| `REGISTRY_ID` | `registry.local` | This instance's source-qualified registry id (SPEC §9). Every output carrying publisher identity is qualified with it so hosts resolve `(registry, publisher, tag)` and pin each prefix to one registry. Production sets it to the instance's canonical id (e.g. `registry.gridmason.dev`). |
+
+## Identity (OIDC)
+
+Publisher registration is bound to an OIDC identity; the **issuer is the trust
+anchor** (SPEC §2). See [`api/publisher.md`](api/publisher.md).
+
+| Variable | Default | Description |
+|---|---|---|
+| `OIDC_ISSUER_ALLOWLIST` | *(empty)* | Comma-separated list of trusted OIDC issuer URLs. A registration's bearer token is accepted only when its `iss` claim is one of these. **Empty means no issuer is trusted, so no publisher can register (fail closed)** — an instance must set at least one issuer before it accepts registrations. |
+| `OIDC_AUDIENCE` | *(empty)* | Required token audience (`aud`). When set, a registration token is accepted only if its `aud` claim includes this value; empty means the audience is not checked. Set it to this registry's canonical id so a token minted for a different relying party cannot be replayed here. |
+
+> The registration token's **signature is verified** against the issuer's
+> published keys: for the token's `iss` (which must be on the allowlist), the
+> registry performs OIDC discovery (`<issuer>/.well-known/openid-configuration`),
+> fetches the `jwks_uri` key set (cached, with automatic refetch on key
+> rotation), and verifies the signature before any claim is trusted. Only
+> asymmetric algorithms are accepted — `alg: none` and the `HS*` family are
+> refused (alg-confusion guard) — and `exp`/`nbf` are enforced. If the issuer's
+> discovery or JWKS endpoint cannot be reached, verification **fails closed** and
+> the request is rejected (HTTP `503`), never accepted unverified.
 
 ## Storage
 
