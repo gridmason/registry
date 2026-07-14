@@ -1,0 +1,14 @@
+node_modules
+dist
+coverage
+.git
+.github
+.gitignore
+Dockerfile
+.dockerignore
+npm-debug.log*
+*.log
+docs
+test
+vitest.config.ts
+eslint.config.js

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<!--
+  Gridmason Registry — operator policy page (SINGLE SOURCE TEMPLATE).
+
+  Do not edit the files in docs/policy/rendered/ by hand; they are generated.
+  Edit this template and/or the variant data in docs/policy/variants/<v>.json,
+  then run `npm run policy:render`. `npm run policy:check` (and the test suite)
+  fail if the committed rendered pages drift from this source.
+
+  Template syntax:  ·  ·  ·
+  … · . See scripts/render-policy.ts.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Registry policy — ACME Registry (operator: set instance name)</title>
+    <style>
+      :root { color-scheme: light dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0 auto; max-width: 52rem; padding: 2.5rem 1.25rem 4rem;
+        font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: #1a1a1a; background: #fff;
+      }
+      @media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #16171a; } }
+      h1 { font-size: 1.9rem; margin: 0 0 0.25rem; }
+      h2 { font-size: 1.25rem; margin: 2.25rem 0 0.5rem; padding-top: 0.75rem; border-top: 1px solid #8883; }
+      h3 { font-size: 1.02rem; margin: 1.25rem 0 0.35rem; }
+      .lede { color: #6663; }
+      .meta { font-size: 0.85rem; color: #888; margin: 0 0 0.5rem; }
+      .meta code { color: inherit; }
+      table { border-collapse: collapse; width: 100%; margin: 0.75rem 0; font-size: 0.95rem; }
+      th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid #8883; vertical-align: top; }
+      code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      code { background: #8881; padding: 0.05rem 0.3rem; border-radius: 3px; font-size: 0.9em; }
+      .callout {
+        margin: 1rem 0; padding: 0.85rem 1rem; border-left: 4px solid; border-radius: 0 6px 6px 0;
+        background: #8881;
+      }
+      .callout.disclosure { border-color: #d9822b; }
+      .callout.neutral { border-color: #2b8ad9; }
+      .callout h3 { margin-top: 0; }
+      .fill { color: #d9822b; font-weight: 600; }
+      footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #8883; font-size: 0.85rem; color: #888; }
+      a { color: #2b7cd9; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <p class="meta">Gridmason Registry policy · template <code>1.0</code> · variant <code>self-host</code> · effective <code>YYYY-MM-DD (operator: set on publish)</code></p>
+      <h1>Registry policy — ACME Registry (operator: set instance name)</h1>
+      <p class="lede">Self-hosted instance. Registry endpoint: <code>https://registry.example.com</code>. Operated by ACME Corp (operator: set legal operator name).</p>
+    </header>
+
+    <p>
+      This page states the <strong>policy</strong> under which this Gridmason
+      Registry instance reviews, signs, and serves widget and plugin remotes. The
+      review <em>mechanism</em> is part of the open-source platform and is identical
+      on every instance; the <em>policy</em> — what this operator accepts, how it
+      staffs review, and how it handles revocation — belongs to this operator and is
+      published here in full. There are no secret rules (SPEC §4).
+    </p>
+    <p>
+      A registry is <strong>supply chain, never a control plane</strong> (SPEC §1).
+      Hosts reach it over outbound 443 (or signed offline bundles) and keep working
+      when it is unreachable; nothing here lets this registry reach into a running
+      host.
+    </p>
+
+    <h2>1. What this registry serves</h2>
+    <p>
+      Signed, content-hashed ES-module remotes served immutably from a CDN. The
+      reviewed hash <em>is</em> the runnable artifact — a publisher cannot swap code
+      after review. Every served version carries a dual signature and a public
+      transparency-log entry (see §2).
+    </p>
+
+    <h2>2. Trust model</h2>
+    <p>Every published version carries two signatures, verified by hosts together with the content hash and transparency-log inclusion before load:</p>
+    <ul>
+      <li><strong>Publisher signature</strong> — authorship, bound to the publisher's OIDC identity at publish time.</li>
+      <li><strong>Registry countersignature</strong> — this operator's approval, applied <strong>only after review passes</strong>. The countersign key is held separately from review staff.</li>
+    </ul>
+    <p>Transparency log: This instance brings its own countersign key and trust roots, generated at install. Configure whether transparency-log inclusion is a required verify check for your hosts (policy-configurable pre-1.0, SPEC §2). Operator: state your log arrangement here.</p>
+
+    <h2>3. Review policy</h2>
+    <p>Operator: state your review policy here — who may publish, identity tiers accepted, and any instance-specific acceptance rules. The tiers and checks below are the platform defaults; adjust the SLAs to what you actually commit to.</p>
+    <p>
+      Automated checks run first on <code>gridmason publish</code> (malicious-code and
+      SDK-adherence analysis, manifest lint, capability diff, dependency-DAG check).
+      These are the <em>same checks</em> <code>gridmason lint</code> runs locally, so a
+      publisher sees the automated verdict before submitting. Human review then applies
+      by trust tier:
+    </p>
+    <table>
+      <thead><tr><th>Tier</th><th>Covers</th><th>Review SLA</th></tr></thead>
+      <tbody>
+        
+        <tr><td><strong>T1 — declarative</strong></td><td>No executable content — layouts, page types, dashboards.</td><td>operator-defined</td></tr>
+        
+        <tr><td><strong>TF — frontend remote</strong></td><td>Plain-JS widget/plugin remotes: SDK-adherence static analysis + DOM-abuse heuristics over a signed source archive.</td><td>operator-defined</td></tr>
+        
+      </tbody>
+    </table>
+    <p>
+      Capability-increase re-review: operator-defined. Expedited security-patch
+      lane: operator-defined. Appeals go to a <strong>second reviewer, never the
+      original</strong> (SPEC §4.4).
+    </p>
+    
+
+    <h2>4. Separation of duties</h2>
+    <p>
+      Widgets published by this operator's own team ride the same pipeline as
+      everyone else's: reviewed by a <strong>different person than the author</strong> and
+      countersigned by the separately-held registry key. Operators do not self-approve
+      (SPEC §2).
+    </p>
+
+    
+
+    
+    <div class="callout neutral">
+      <h3>This instance enforces separation of duties</h3>
+      <p>
+        Reviewer ≠ author is <strong>enforced</strong> on this instance. It carries
+        <strong>none of the Gridmason flagship's launch-phase waivers</strong> — the flagship's
+        single-roster separation-of-duties waiver and published-target SLAs are specific
+        to <code>registry.gridmason.dev</code> and do not transfer to self-hosted
+        registries.
+      </p>
+      <p>
+        <strong>Countersign-key custody:</strong> operator: document where this instance&#39;s countersign key lives and who holds it. Keep it offline and separate from review staff (SPEC §2). This instance&#39;s key is generated at install and is unrelated to the Gridmason flagship&#39;s key.
+      </p>
+      <p class="fill">
+        Operator: replace the reviewer-roster, SLA, and contact fields below with this
+        instance's actual policy before publishing.
+      </p>
+    </div>
+    
+
+    <h3>Review roster &amp; staffing</h3>
+    <p>Operator: list your review roster and staffing here. Because separation of duties is enforced on this instance, you need at least two reviewers so that reviewer ≠ author for your own team&#39;s publications.</p>
+
+    <h2>5. Revocation &amp; kill switch</h2>
+    <p>
+      This registry owns distribution state (published / revoked / killed) and
+      publishes it as a signed revocation &amp; kill feed; hosts consume it and fail
+      closed for revocation within the cache TTL (max 24 h). A killed remote
+      never enters a host's import map regardless of local enablement (SPEC §6).
+    </p>
+    <p>Severity policy: operator: state your severity and kill-switch policy. The platform default is to kill actively-exploited or credential-path issues immediately and propagate other revocations within 1 hour online.</p>
+
+    <h2>6. Contact</h2>
+    <p>Operator: provide the contact and reporting channels for this instance.</p>
+    <p>
+      Suspected vulnerabilities in this registry or in a served artifact must be
+      reported privately — never as a public issue. See
+      <a href="SECURITY.md">the security policy</a>.
+    </p>
+
+    <footer>
+      <p>
+        This page is rendered from the Gridmason Registry policy template
+        (<code>docs/policy/policy-page.template.html</code>, variant
+        <code>self-host</code>). The registry is open source under AGPL-3.0; the
+        flagship runs the same released image with no proprietary fork (SPEC §9).
+      </p>
+    </footer>
+  </body>
+</html>
