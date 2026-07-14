@@ -1,0 +1,56 @@
+name: CI
+
+# GitHub Actions natively skips runs whose head commit message contains
+# `[skip ci]`, which the issue-flow sub-issue drafts rely on; the batch PR
+# carries a normal commit that triggers this workflow once.
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  container:
+    name: Build image + healthcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t gridmason-registry:ci .
+      - name: Boot container
+        run: docker run -d --name registry -p 8080:8080 gridmason-registry:ci
+      - name: Wait for /healthz to return 200
+        run: |
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/healthz || true)
+            if [ "$code" = "200" ]; then
+              echo "healthz returned 200"
+              curl -s http://127.0.0.1:8080/healthz
+              exit 0
+            fi
+            echo "attempt $i: healthz returned '$code', retrying..."
+            sleep 1
+          done
+          echo "healthz did not return 200 in time"
+          docker logs registry
+          exit 1
+      - name: Stop container
+        if: always()
+        run: docker rm -f registry || true
