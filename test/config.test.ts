@@ -18,6 +18,10 @@ describe('loadConfig', () => {
         issuerAllowlist: [],
         audience: '',
       },
+      http: {
+        bodyLimitBytes: 65_536,
+        maxHeaderSizeBytes: 16_384,
+      },
       postgres: {
         url: 'postgres://gridmason:gridmason@localhost:5432/gridmason',
         poolMax: 10,
@@ -124,5 +128,51 @@ describe('loadConfig', () => {
 
   it('rejects an unknown NODE_ENV', () => {
     expect(() => loadConfig({ NODE_ENV: 'staging' })).toThrow(ConfigError);
+  });
+
+  it('applies default HTTP transport caps and reads overrides', () => {
+    expect(loadConfig({}).http).toEqual({
+      bodyLimitBytes: 65_536,
+      maxHeaderSizeBytes: 16_384,
+    });
+    const config = loadConfig({
+      HTTP_BODY_LIMIT_BYTES: '131072',
+      HTTP_MAX_HEADER_SIZE_BYTES: '32768',
+    });
+    expect(config.http).toEqual({
+      bodyLimitBytes: 131_072,
+      maxHeaderSizeBytes: 32_768,
+    });
+  });
+
+  it('rejects an out-of-range HTTP header size cap', () => {
+    // Below the 8 KiB floor (must stay above an 8 KiB bearer token).
+    expect(() => loadConfig({ HTTP_MAX_HEADER_SIZE_BYTES: '4096' })).toThrow(ConfigError);
+  });
+
+  it('accepts a well-formed https issuer allowlist', () => {
+    expect(
+      loadConfig({ OIDC_ISSUER_ALLOWLIST: 'https://a.example, https://b.example/oidc' })
+        .oidc.issuerAllowlist,
+    ).toEqual(['https://a.example', 'https://b.example/oidc']);
+  });
+
+  it('allows http only for a loopback issuer (dev)', () => {
+    expect(
+      loadConfig({ OIDC_ISSUER_ALLOWLIST: 'http://localhost:8080, http://127.0.0.1:9000' })
+        .oidc.issuerAllowlist,
+    ).toEqual(['http://localhost:8080', 'http://127.0.0.1:9000']);
+  });
+
+  it('rejects a plain-http non-loopback issuer at boot (item 5)', () => {
+    expect(() => loadConfig({ OIDC_ISSUER_ALLOWLIST: 'http://issuer.example' })).toThrow(
+      /must be an https/,
+    );
+  });
+
+  it('rejects a malformed issuer URL at boot (item 5)', () => {
+    expect(() => loadConfig({ OIDC_ISSUER_ALLOWLIST: 'not-a-url' })).toThrow(
+      /not a valid URL/,
+    );
   });
 });

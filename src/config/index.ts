@@ -59,6 +59,22 @@ export interface OidcConfig {
   readonly audience: string;
 }
 
+/** HTTP transport caps applied at the Fastify/Node server boundary. */
+export interface HttpConfig {
+  /**
+   * Maximum accepted request body size in bytes. The control-plane API only
+   * takes small JSON bodies, so this is set well below Fastify's 1 MiB default
+   * to bound memory an unauthenticated caller can force us to buffer.
+   */
+  readonly bodyLimitBytes: number;
+  /**
+   * Maximum total size (bytes) of the request header block, passed to the
+   * underlying Node HTTP server. Comfortably above an 8 KiB bearer token plus
+   * ordinary headers, but bounded so oversized header floods are rejected early.
+   */
+  readonly maxHeaderSizeBytes: number;
+}
+
 /** S3-compatible object-store settings (artifacts, release docs, feeds). */
 export interface ObjectStoreConfig {
   /**
@@ -107,6 +123,8 @@ export interface Config {
   readonly registryId: string;
   /** OIDC identity settings. */
   readonly oidc: OidcConfig;
+  /** HTTP transport caps. */
+  readonly http: HttpConfig;
   /** Postgres connection settings. */
   readonly postgres: PostgresConfig;
   /** S3-compatible object-store settings. */
@@ -178,11 +196,44 @@ function readEnum<T extends string>(
   return raw as T;
 }
 
+function isLoopbackHost(hostname: string): boolean {
+  // URL strips the brackets from an IPv6 literal, so `[::1]` arrives as `::1`.
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
+/**
+ * Validate the OIDC issuer allowlist at boot (fail fast — item 5). Each entry
+ * must be a well-formed absolute `https://` URL; plain `http://` is permitted
+ * only for loopback hosts so a local dev issuer still works. A malformed or
+ * insecure entry throws {@link ConfigError} rather than surfacing later as a
+ * confusing discovery failure at first registration.
+ */
+function validateIssuerAllowlist(issuers: readonly string[]): void {
+  for (const issuer of issuers) {
+    let url: URL;
+    try {
+      url = new URL(issuer);
+    } catch {
+      throw new ConfigError(
+        `OIDC_ISSUER_ALLOWLIST entry "${issuer}" is not a valid URL`,
+      );
+    }
+    if (url.protocol === 'https:') continue;
+    if (url.protocol === 'http:' && isLoopbackHost(url.hostname)) continue;
+    throw new ConfigError(
+      `OIDC_ISSUER_ALLOWLIST entry "${issuer}" must be an https:// URL ` +
+        '(http:// is allowed only for a loopback host)',
+    );
+  }
+}
+
 /**
  * Build the immutable {@link Config} from an environment map (defaults to
  * `process.env`). Throws {@link ConfigError} on the first invalid value.
  */
 export function loadConfig(env: Env = process.env): Config {
+  const issuerAllowlist = readStringList(env, 'OIDC_ISSUER_ALLOWLIST', []);
+  validateIssuerAllowlist(issuerAllowlist);
   return {
     nodeEnv: readEnum(env, 'NODE_ENV', 'development', NODE_ENVS),
     host: readString(env, 'HOST', '0.0.0.0'),
@@ -198,8 +249,18 @@ export function loadConfig(env: Env = process.env): Config {
     // (e.g. registry.gridmason.dev), which becomes the widget `source` string.
     registryId: readString(env, 'REGISTRY_ID', 'registry.local'),
     oidc: {
-      issuerAllowlist: readStringList(env, 'OIDC_ISSUER_ALLOWLIST', []),
+      issuerAllowlist,
       audience: readString(env, 'OIDC_AUDIENCE', ''),
+    },
+    http: {
+      bodyLimitBytes: readInt(env, 'HTTP_BODY_LIMIT_BYTES', 65_536, {
+        min: 1_024,
+        max: 10_485_760,
+      }),
+      maxHeaderSizeBytes: readInt(env, 'HTTP_MAX_HEADER_SIZE_BYTES', 16_384, {
+        min: 8_192,
+        max: 1_048_576,
+      }),
     },
     postgres: {
       // Default targets the local dev compose (see compose.yaml). Production

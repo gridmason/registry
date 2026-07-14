@@ -50,6 +50,9 @@ const REJECTION_RESPONSES: Record<
   { readonly status: number; readonly code: string; readonly message: string }
 > = {
   'missing-token': { status: 401, code: 'missing_token', message: 'a bearer token is required' },
+  // Oversized credential: refused before any decode. Kept indistinguishable from
+  // a malformed token (same code/message) so it is not a probing oracle.
+  'token-too-large': { status: 401, code: 'invalid_token', message: 'the token could not be validated' },
   'malformed-token': { status: 401, code: 'invalid_token', message: 'the token could not be validated' },
   'missing-claims': { status: 401, code: 'invalid_token', message: 'the token could not be validated' },
   expired: { status: 401, code: 'token_expired', message: 'the token has expired' },

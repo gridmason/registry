@@ -146,4 +146,112 @@ describe('createOidcVerifier', () => {
       issuer.failJwks(null);
     }
   });
+
+  // --- Auth/API hardening (issue #29) ---
+
+  it('rejects a token over the size cap before any decode (item 3)', async () => {
+    // Over 8 KiB: refused on length alone, never parsed.
+    const oversized = 'a'.repeat(8_193);
+    await expect(verifier().verify(oversized)).resolves.toEqual({
+      ok: false,
+      reason: 'token-too-large',
+    });
+  });
+
+  it('honours a configured max token length (item 3)', async () => {
+    const v = createOidcVerifier({ issuerAllowlist: [issuer.issuer], maxTokenLength: 10 });
+    await expect(v.verify('12345678901')).resolves.toEqual({
+      ok: false,
+      reason: 'token-too-large',
+    });
+  });
+
+  it('does not follow a redirect on discovery — fails closed (item 1)', async () => {
+    // A compromised issuer 302s discovery at the JWKS endpoint (stand-in for an
+    // internal address). The redirect must not be followed.
+    issuer.redirectDiscovery(`${issuer.issuer}/jwks`);
+    try {
+      const v = createOidcVerifier({ issuerAllowlist: [issuer.issuer] });
+      const token = await issuer.sign({ iss: issuer.issuer, sub: 'user-1', exp: FUTURE });
+      const jwksBefore = issuer.jwksHits();
+      await expect(v.verify(token)).resolves.toEqual({
+        ok: false,
+        reason: 'verification-unavailable',
+      });
+      // The redirect target was never fetched.
+      expect(issuer.jwksHits()).toBe(jwksBefore);
+    } finally {
+      issuer.redirectDiscovery(null);
+    }
+  });
+
+  it('does not follow a redirect on the JWKS fetch — fails closed (item 1)', async () => {
+    issuer.redirectJwks(`${issuer.issuer}/.well-known/openid-configuration`);
+    try {
+      const v = createOidcVerifier({ issuerAllowlist: [issuer.issuer] });
+      const token = await issuer.sign({ iss: issuer.issuer, sub: 'user-1', exp: FUTURE });
+      const discoveryBefore = issuer.discoveryHits();
+      await expect(v.verify(token)).resolves.toEqual({
+        ok: false,
+        reason: 'verification-unavailable',
+      });
+      // Discovery was hit once to resolve jwks_uri; the JWKS redirect back to
+      // discovery was not followed.
+      expect(issuer.discoveryHits()).toBe(discoveryBefore + 1);
+    } finally {
+      issuer.redirectJwks(null);
+    }
+  });
+
+  it('backs off per-issuer after an unreachable verification (item 2)', async () => {
+    issuer.failDiscovery(500);
+    let clock = 1_000;
+    try {
+      const v = createOidcVerifier({
+        issuerAllowlist: [issuer.issuer],
+        failureBackoffBaseMs: 5_000,
+        now: () => clock,
+      });
+      const token = await issuer.sign({ iss: issuer.issuer, sub: 'user-1', exp: FUTURE });
+      const before = issuer.discoveryHits();
+
+      await expect(v.verify(token)).resolves.toEqual({
+        ok: false,
+        reason: 'verification-unavailable',
+      });
+      expect(issuer.discoveryHits()).toBe(before + 1);
+
+      // Inside the backoff window: short-circuits without touching discovery.
+      await expect(v.verify(token)).resolves.toEqual({
+        ok: false,
+        reason: 'verification-unavailable',
+      });
+      expect(issuer.discoveryHits()).toBe(before + 1);
+
+      // Past the window: discovery is retried.
+      clock = 7_000;
+      await expect(v.verify(token)).resolves.toEqual({
+        ok: false,
+        reason: 'verification-unavailable',
+      });
+      expect(issuer.discoveryHits()).toBe(before + 2);
+    } finally {
+      issuer.failDiscovery(null);
+    }
+  });
+
+  it('caches a recent failure so a repeated bad token is refused without re-verifying (item 2)', async () => {
+    // cooldown 0 lets jose refetch the JWKS on the unknown kid, so a repeat that
+    // was NOT cached would generate fresh JWKS traffic.
+    const v = createOidcVerifier({ issuerAllowlist: [issuer.issuer], jwksCooldownMs: 0 });
+    const token = await issuer.signWithUnknownKid({ iss: issuer.issuer, sub: 'user-1', exp: FUTURE });
+
+    await expect(v.verify(token)).resolves.toEqual({ ok: false, reason: 'invalid-signature' });
+    const afterFirst = issuer.jwksHits();
+    expect(afterFirst).toBeGreaterThan(0);
+
+    // The identical token is served from the failure cache: zero JWKS traffic.
+    await expect(v.verify(token)).resolves.toEqual({ ok: false, reason: 'invalid-signature' });
+    expect(issuer.jwksHits()).toBe(afterFirst);
+  });
 });

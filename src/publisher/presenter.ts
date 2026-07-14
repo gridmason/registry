@@ -39,13 +39,18 @@ export function toPublisherResponse(
   };
 }
 
+/**
+ * Prefix ownership is an anonymous, unauthenticated lookup, so it deliberately
+ * exposes **only** the registry-local publisher id and tier — never the owner's
+ * raw OIDC `issuer`/`subject`. Those identity claims are a fingerprinting
+ * surface with no bearing on "who owns this prefix here"; a caller that needs
+ * them reads the publisher record by id. (Hardening item 6.)
+ */
 export interface PrefixOwnershipResponse {
   readonly prefix: string;
   readonly registryId: string;
   readonly owner: {
     readonly publisherId: string;
-    readonly issuer: string;
-    readonly subject: string;
     readonly tier: PublisherRecord['tier'];
   };
 }
@@ -59,8 +64,6 @@ export function toPrefixOwnershipResponse(
     registryId,
     owner: {
       publisherId: record.id,
-      issuer: record.issuer,
-      subject: record.subject,
       tier: record.tier,
     },
   };

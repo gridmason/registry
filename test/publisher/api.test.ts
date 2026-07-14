@@ -158,6 +158,24 @@ describe('publisher API', () => {
     expect(res.json().error.code).toBe('token_expired');
   });
 
+  it('rejects an oversized bearer token with 401 (item 3)', async () => {
+    const oversized = 'a'.repeat(8_193);
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/publishers',
+      headers: auth(oversized),
+      payload: { prefix: 'acme' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('invalid_token');
+    expect(audit).toEqual([
+      expect.objectContaining({
+        action: 'publisher.register.denied',
+        subject: 'register:token-too-large',
+      }),
+    ]);
+  });
+
   it('rejects an invalid prefix with 400', async () => {
     const res = await app.inject({
       method: 'POST',
@@ -204,11 +222,42 @@ describe('publisher API', () => {
 
     const res = await app.inject({ method: 'GET', url: '/v1/prefixes/acme' });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toMatchObject({
+    const body = res.json();
+    expect(body).toMatchObject({
       prefix: 'acme',
       registryId: REGISTRY_ID,
-      owner: { issuer: issuer.issuer, subject: 'user-1' },
+      owner: { tier: 'community' },
     });
+    expect(typeof body.owner.publisherId).toBe('string');
+    // The anonymous prefix lookup must not leak the owner's raw OIDC identity.
+    expect(body.owner).not.toHaveProperty('issuer');
+    expect(body.owner).not.toHaveProperty('subject');
+  });
+
+  it('rejects a request body over the configured limit with 413 (item 4)', async () => {
+    const tinyConfig = loadConfig({
+      LOG_LEVEL: 'silent',
+      REGISTRY_ID,
+      HTTP_BODY_LIMIT_BYTES: '1024',
+    });
+    const verifier = createOidcVerifier({ issuerAllowlist: [issuer.issuer] });
+    const tinyApp = await buildServer({
+      config: tinyConfig,
+      logger,
+      publisherStore: store,
+      oidcVerifier: verifier,
+    });
+    try {
+      const res = await tinyApp.inject({
+        method: 'POST',
+        url: '/v1/publishers',
+        headers: auth(validToken),
+        payload: { prefix: 'acme', blob: 'x'.repeat(2048) },
+      });
+      expect(res.statusCode).toBe(413);
+    } finally {
+      await tinyApp.close();
+    }
   });
 
   it('returns 404 for an unknown publisher and prefix', async () => {

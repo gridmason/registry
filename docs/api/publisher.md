@@ -28,7 +28,12 @@ trusts. Verification:
 - enforces `exp` and `nbf` (with a small clock-skew tolerance);
 - enforces `aud` when `OIDC_AUDIENCE` is configured;
 - **fails closed**: if the issuer's discovery or JWKS endpoint is unreachable the
-  request is rejected (`503`), never accepted unverified.
+  request is rejected (`503`), never accepted unverified;
+- **follows no redirects** on the discovery or JWKS fetch, so a compromised
+  issuer cannot bounce the registry at an internal address;
+- rejects a bearer token larger than **8 KiB** before decoding it, and throttles
+  repeated verifications against an unreachable issuer so invalid-token spam
+  cannot amplify into unbounded discovery/JWKS traffic.
 
 ## Namespace prefix
 
@@ -85,7 +90,7 @@ Responses:
 | `400` | `invalid_request` | body missing `prefix`, or an invalid `tier` |
 | `400` | `invalid_prefix` | `prefix` fails the format rules |
 | `401` | `missing_token` | no bearer token |
-| `401` | `invalid_token` | token malformed, missing `iss`/`sub`, or its **signature does not verify** against the issuer JWKS (includes `alg: none`/`HS*`) |
+| `401` | `invalid_token` | token malformed, over the 8 KiB size cap, missing `iss`/`sub`, or its **signature does not verify** against the issuer JWKS (includes `alg: none`/`HS*`) |
 | `401` | `token_expired` | token `exp` is in the past |
 | `401` | `token_not_yet_valid` | token `nbf` is in the future |
 | `403` | `issuer_not_allowed` | token issuer not on the allowlist |
@@ -112,9 +117,14 @@ Anonymous. `200` with source-qualified ownership, or `404 not_found`:
 {
   "prefix": "acme",
   "registryId": "registry.local",
-  "owner": { "publisherId": "…", "issuer": "https://…", "subject": "…", "tier": "community" }
+  "owner": { "publisherId": "…", "tier": "community" }
 }
 ```
+
+This unauthenticated lookup deliberately exposes **only** the registry-local
+`publisherId` and `tier` — never the owner's raw OIDC `issuer`/`subject`. Those
+claims are a fingerprinting surface with no bearing on "who owns this prefix
+here"; read `GET /v1/publishers/:id` for the full record.
 
 ## Error body
 
