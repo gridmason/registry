@@ -18,6 +18,10 @@ describe('loadConfig', () => {
         issuerAllowlist: [],
         audience: '',
       },
+      review: {
+        reviewerIdentities: [],
+        selfReviewWaiver: false,
+      },
       http: {
         bodyLimitBytes: 65_536,
         maxHeaderSizeBytes: 16_384,
@@ -102,6 +106,25 @@ describe('loadConfig', () => {
     expect(loadConfig({ OIDC_AUDIENCE: 'registry.example.com' }).oidc.audience).toBe(
       'registry.example.com',
     );
+  });
+
+  it('defaults the review lane to an empty reviewer set and the waiver off', () => {
+    expect(loadConfig({}).review).toEqual({
+      reviewerIdentities: [],
+      selfReviewWaiver: false,
+    });
+  });
+
+  it('parses the reviewer set and the self-review waiver flag', () => {
+    const config = loadConfig({
+      REVIEW_REVIEWER_IDENTITIES: 'https%3A%2F%2Fissuer.example reviewer-1 , https%3A%2F%2Fissuer.example reviewer-2',
+      REVIEW_SELF_REVIEW_WAIVER: 'true',
+    });
+    expect(config.review.reviewerIdentities).toEqual([
+      'https%3A%2F%2Fissuer.example reviewer-1',
+      'https%3A%2F%2Fissuer.example reviewer-2',
+    ]);
+    expect(config.review.selfReviewWaiver).toBe(true);
   });
 
   it('accepts 1/0 as booleans and rejects other strings', () => {

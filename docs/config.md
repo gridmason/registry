@@ -48,6 +48,18 @@ anchor** (SPEC §2). See [`api/publisher.md`](api/publisher.md).
 > of recent *definite* verification failures short-circuits an identical spammed
 > token without re-verifying it.
 
+## Human review lane
+
+The single human review lane (SPEC §4, §4a; see
+[`review/human-lane.md`](review/human-lane.md)) reads its reviewer roster and the
+disclosed flagship waiver from configuration — there is no reviewer console this
+phase (SCOPE cut).
+
+| Variable | Default | Description |
+|---|---|---|
+| `REVIEW_REVIEWER_IDENTITIES` | *(empty)* | Comma-separated list of the OIDC identities permitted to submit a verdict, each in the canonical composite form `<url-encoded-issuer> <url-encoded-subject>` (what `composeOidcIdentity` produces — the same string the audit log and publisher records key on, e.g. `https%3A%2F%2Fissuer.example reviewer-1`). Percent-encoding leaves no literal comma in an entry, so the comma-separated list is unambiguous. **Empty means no identity can review (fail closed).** |
+| `REVIEW_SELF_REVIEW_WAIVER` | `false` | The disclosed flagship self-review waiver (SPEC §4a): when `true`, an operator who authored an artifact may also review it (separation of duties waived while the flagship is single-rostered), the use is recorded on the review case and gets its own audit event so the release can be flagged. **Off by default and never enabled on a self-host instance** — every self-hoster keeps reviewer≠author. |
+
 ## Storage
 
 Records, the review queue, and the audit log live in **Postgres**; artifacts,

@@ -19,6 +19,7 @@ import type { Config } from './config/index.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
 import { publisherRoutes } from './http/publisher.js';
+import { reviewRoutes } from './http/review.js';
 import {
   createDefaultReadinessRegistry,
   type ReadinessRegistry,
@@ -26,6 +27,7 @@ import {
 import type { Logger } from './logging/index.js';
 import { createPostgresPublisherStore, type PublisherStore } from './publisher/store.js';
 import { createAutomatedReviewStage } from './review/automated.js';
+import { createHumanReviewLane } from './review/human/lane.js';
 import { createPostgresReviewCaseStore, type ReviewCaseStore } from './review/store.js';
 import type { ObjectStore } from './storage/object-store.js';
 import { registerStorageProbes, type Storage } from './storage/index.js';
@@ -132,15 +134,18 @@ export async function buildServer(options: BuildServerOptions) {
         ? createPostgresArtifactStore(options.storage.postgres, logger)
         : undefined);
     const objectStore = options.objectStore ?? options.storage?.objectStore;
+    // The review-case store backs both the automated stage (#8) and the human
+    // lane (#9); the real service always has one (Postgres, backed by storage).
+    const reviewCaseStore =
+      options.reviewCaseStore ??
+      (options.storage
+        ? createPostgresReviewCaseStore(options.storage.postgres)
+        : undefined);
+
     if (artifactStore && objectStore) {
       // The automated-review stage mounts alongside publish whenever a review-case
       // store is available (always in the real service, where storage backs it),
       // so every accepted upload is reviewed before the response (FR-3).
-      const reviewCaseStore =
-        options.reviewCaseStore ??
-        (options.storage
-          ? createPostgresReviewCaseStore(options.storage.postgres)
-          : undefined);
       const reviewStage = reviewCaseStore
         ? createAutomatedReviewStage({ artifactStore, reviewCaseStore })
         : undefined;
@@ -151,6 +156,26 @@ export async function buildServer(options: BuildServerOptions) {
         registryId: config.registryId,
         verifier,
         reviewStage,
+      });
+    }
+
+    // The human review lane (#9) acts on the `reviewing` artifacts the automated
+    // stage produced: it needs the artifact + review-case stores (for the queue
+    // and verdict) and the publisher store (to resolve authorship for
+    // reviewer≠author). It shares the one verifier; the reviewer set + waiver are
+    // config. No object store is required — verdicts move state, not bytes.
+    if (artifactStore && reviewCaseStore) {
+      const lane = createHumanReviewLane({
+        artifactStore,
+        reviewCaseStore,
+        publisherStore,
+        selfReviewWaiver: config.review.selfReviewWaiver,
+      });
+      await app.register(reviewRoutes, {
+        lane,
+        verifier,
+        reviewerIdentities: config.review.reviewerIdentities,
+        registryId: config.registryId,
       });
     }
   }
