@@ -23,8 +23,7 @@
  */
 import type { FastifyInstance, FastifyPluginOptions, FastifyReply } from 'fastify';
 
-import { emitAuditEvent } from '../audit/index.js';
-import { extractBearerToken, type OidcIdentity, type OidcVerifier } from '../auth/oidc.js';
+import { type OidcVerifier } from '../auth/oidc.js';
 import type { CountersignIdentity } from '../countersign/identity.js';
 import { composeOidcIdentity } from '../publisher/types.js';
 import {
@@ -35,7 +34,7 @@ import {
   type RevocationService,
 } from '../revocation/index.js';
 import { sendError } from './errors.js';
-import { OIDC_REJECTION_RESPONSES } from './oidc-rejection.js';
+import { authenticateOperator } from './operator-auth.js';
 
 /** The advisory severities a revoke/kill may carry (protocol `RevocationSeverity`). */
 const SEVERITIES = ['low', 'medium', 'high', 'critical'] as const;
@@ -52,11 +51,6 @@ interface RevocationPluginOptions extends FastifyPluginOptions {
   /** Freshness window (seconds) stamped on each served feed. */
   feedTtlSeconds: number;
 }
-
-/** A resolved operator, or a response already sent (the caller returns its body). */
-type OperatorAuth =
-  | { readonly ok: true; readonly identity: OidcIdentity }
-  | { readonly ok: false; readonly body: unknown };
 
 interface IssueBody {
   severity?: unknown;
@@ -98,42 +92,6 @@ export async function revocationRoutes(
   } = options;
   const operators = new Set(options.operatorIdentities);
 
-  /**
-   * Authenticate the bearer token and authorise it as an operator. On failure the
-   * response is already sent (and the denial audited); the caller returns `body`.
-   */
-  async function authenticateOperator(
-    request: { headers: { authorization?: string } },
-    reply: FastifyReply,
-  ): Promise<OperatorAuth> {
-    const token = extractBearerToken(request.headers.authorization);
-    if (!token) {
-      return { ok: false, body: sendError(reply, 401, 'missing_token', 'a bearer token is required') };
-    }
-    const verified = await verifier.verify(token);
-    if (!verified.ok) {
-      // The token failed verification, so its claims are untrusted — name only the reason.
-      emitAuditEvent('anonymous', 'ops.denied', `ops:${verified.reason}`);
-      const { status, code, message } = OIDC_REJECTION_RESPONSES[verified.reason];
-      return { ok: false, body: sendError(reply, status, code, message) };
-    }
-    const identity = verified.identity;
-    const operatorId = composeOidcIdentity(identity.issuer, identity.subject);
-    if (!operators.has(operatorId)) {
-      emitAuditEvent(operatorId, 'ops.denied', 'ops:not-an-operator');
-      return {
-        ok: false,
-        body: sendError(
-          reply,
-          403,
-          'not_an_operator',
-          'this identity is not on the registry operator set',
-        ),
-      };
-    }
-    return { ok: true, identity };
-  }
-
   app.get('/v1/revocation/feed', async () => {
     // Anonymous, generated live: the feed is current as of `issuedAt = now`, so a
     // revoke/kill appended since the last fetch is reflected on this one (a kill
@@ -158,7 +116,7 @@ export async function revocationRoutes(
       },
       reply: FastifyReply,
     ): Promise<unknown> => {
-      const auth = await authenticateOperator(request, reply);
+      const auth = await authenticateOperator(request, reply, verifier, operators);
       if (!auth.ok) return auth.body;
 
       const body = (request.body ?? {}) as IssueBody;

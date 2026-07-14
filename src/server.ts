@@ -14,13 +14,19 @@ import {
   createPostgresArtifactStore,
   type ArtifactStore,
 } from './artifact/store.js';
+import {
+  createPostgresAuditQueryStore,
+  type AuditQueryStore,
+} from './audit/query.js';
 import { createOidcVerifier, type OidcVerifier } from './auth/oidc.js';
 import type { Config } from './config/index.js';
 import {
   createCountersignStage,
   loadCountersignIdentity,
   type CountersignIdentity,
+  type CountersignStage,
 } from './countersign/index.js';
+import { createReleaseRedriveService } from './countersign/redrive.js';
 import { createPostgresReleaseDocStore, type ReleaseDocStore } from './release/store.js';
 import {
   createPostgresFeedEntryStore,
@@ -35,6 +41,8 @@ import { servingRoutes } from './http/serving.js';
 import { publisherRoutes } from './http/publisher.js';
 import { reviewRoutes } from './http/review.js';
 import { revocationRoutes } from './http/revocation.js';
+import { auditRoutes } from './http/audit.js';
+import { releaseOpsRoutes } from './http/release-ops.js';
 import {
   createDefaultReadinessRegistry,
   type ReadinessRegistry,
@@ -110,6 +118,13 @@ export interface BuildServerOptions {
    * wired to a local fake issuer so no network is touched.
    */
   oidcVerifier?: OidcVerifier;
+  /**
+   * Audit-log read store backing the operator audit-query endpoint (#15). Defaults
+   * to a Postgres-backed store over `storage.postgres`; tests inject an in-memory
+   * store (typically the same object installed as the audit sink, so events emitted
+   * by driven transitions are read back through the endpoint).
+   */
+  auditQueryStore?: AuditQueryStore;
 }
 
 export async function buildServer(options: BuildServerOptions) {
@@ -252,15 +267,17 @@ export async function buildServer(options: BuildServerOptions) {
           ? createPostgresReleaseDocStore(options.storage.postgres)
           : undefined);
       let onApprove: Parameters<typeof createHumanReviewLane>[0]['onApprove'];
+      let countersignStage: CountersignStage | undefined;
       if (countersignIdentity && releaseDocStore) {
         const transparencyLog =
           options.transparencyLog ?? createTransparencyLog(config.transparencyLog);
-        const stage = createCountersignStage({
+        countersignStage = createCountersignStage({
           identity: countersignIdentity,
           transparencyLog,
           releaseDocStore,
           logger,
         });
+        const stage = countersignStage;
         // The stage records its own faults; the hook resolves void so a publish
         // failure never unwinds the already-committed approval.
         onApprove = async (outcome) => {
@@ -281,6 +298,25 @@ export async function buildServer(options: BuildServerOptions) {
         reviewerIdentities: config.review.reviewerIdentities,
         registryId: config.registryId,
       });
+
+      // The release re-drive ops endpoint (#38) completes an artifact left
+      // approved-but-unpublished by a transparency-log outage. It reuses the same
+      // countersign stage as the approval hook, so it only mounts when that stage
+      // is wired (countersign key + release-doc store) — the same instances that
+      // publish releases at all.
+      if (countersignStage && releaseDocStore) {
+        const redriveService = createReleaseRedriveService({
+          artifactStore,
+          releaseDocStore,
+          reviewCaseStore,
+          stage: countersignStage,
+        });
+        await app.register(releaseOpsRoutes, {
+          service: redriveService,
+          verifier,
+          operatorIdentities: config.ops.operatorIdentities,
+        });
+      }
     }
 
     // The revocation & kill feed (#14) is the registry's distribution-state
@@ -301,6 +337,22 @@ export async function buildServer(options: BuildServerOptions) {
         operatorIdentities: config.ops.operatorIdentities,
         registryId: config.registryId,
         feedTtlSeconds: config.revocation.feedTtlSeconds,
+      });
+    }
+
+    // The audit-query endpoint (#15, FR-12) reads back the trail every transition
+    // writes. It is an operator surface (same operator set as revocation ops) but
+    // needs no countersign key or feed store — only the verifier and an audit read
+    // store — so it mounts on its own whenever a query store is available (always,
+    // over storage; injected in tests).
+    const auditQueryStore =
+      options.auditQueryStore ??
+      (options.storage ? createPostgresAuditQueryStore(options.storage.postgres) : undefined);
+    if (auditQueryStore) {
+      await app.register(auditRoutes, {
+        store: auditQueryStore,
+        verifier,
+        operatorIdentities: config.ops.operatorIdentities,
       });
     }
   }

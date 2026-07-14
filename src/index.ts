@@ -2,7 +2,7 @@
  * Service entrypoint: load config, build the logger and server, start
  * listening, and shut down gracefully on signal.
  */
-import { loadConfig } from './config/index.js';
+import { collectBootWarnings, loadConfig } from './config/index.js';
 import {
   combineAuditSinks,
   emitAuditEvent,
@@ -17,6 +17,12 @@ import { createStorage } from './storage/index.js';
 async function main(): Promise<void> {
   const config = loadConfig();
   const logger = createLogger(config);
+
+  // Surface risky-but-permitted configuration once at boot (e.g. a non-durable
+  // transparency log). Fatal misconfigurations already threw in `loadConfig`.
+  for (const warning of collectBootWarnings(config)) {
+    logger.warn({ boot: true }, warning);
+  }
 
   const storage = createStorage(config);
 
