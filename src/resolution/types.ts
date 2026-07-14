@@ -9,12 +9,17 @@
  * before it loads a byte, plus `scopes` entries that resolve shared-dependency
  * majors when two widgets need different ones.
  *
- * The wire shapes are **owned by the registry**: `@gridmason/protocol` 0.2.0 ships
- * the *pieces* a bundle is built from ({@link SignatureEnvelope},
- * {@link TransparencyLogEntry}, {@link ReleaseDoc}, {@link Manifest}) but not a
- * gate-snapshot / import-map-fragment type. The Gridmason Dashboard's Phase-B
- * remote loader (D-E3) consumes these shapes; a future `@gridmason/protocol`
- * revision may promote them to the shared contract (cross-repo follow-up).
+ * **These shapes now live in `@gridmason/protocol`.** They were owned by the
+ * registry until a second consumer — the Gridmason Dashboard's Phase-B remote
+ * loader (dashboard D-E3.1) — joined as a user of the same contract, so they were
+ * promoted into `@gridmason/protocol@0.3.0` (`types/resolution`, protocol #66) with
+ * generated JSON schemas + ajv vectors and zero field drift versus the shapes the
+ * registry had shipped. The registry now **re-exports** them from the shared
+ * package rather than owning them; the resolver (`./resolve.ts`), the shared-scope
+ * matcher (`./shared-scope.ts`), and the HTTP route (`../http/resolution`) continue
+ * to import from `./index.js` unchanged. `POST /v1/resolve` output validates
+ * against `@gridmason/protocol/schemas/import-map-fragment.json`
+ * (see `test/resolution/schema.test.ts`).
  *
  * **Anonymous.** The API takes no auth and requires no deployment registration —
  * a registry is never a control plane a deployment must phone (SPEC §1, §8). The
@@ -28,152 +33,30 @@
  * pins each prefix to one registry and composes absolute URLs by prepending that
  * registry's pinned serving origin to the root-relative paths here.
  */
-import type {
-  Manifest,
-  ReleaseDoc,
-  SignatureEnvelope,
-  TransparencyLogEntry,
+import type { Manifest } from '@gridmason/protocol';
+
+export type {
+  /** One enabled remote in a host's gate snapshot (exact source-qualified `(publisher, tag, version)`). */
+  GateModule,
+  /** One shared-dependency major the host shell offers for a bare specifier. */
+  SharedOffer,
+  /** A gate snapshot: the request body of `POST /v1/resolve`. */
+  GateSnapshot,
+  /** The signature bundle a host verifies before loading a module (`verifyRelease` inputs). */
+  SignatureBundle,
+  /** One resolved module in a fragment: source-qualified identity + hash-pinned URL + bundle. */
+  ResolvedModule,
+  /** Stable machine code for why a requested module was not placed in the fragment. */
+  ExclusionReason,
+  /** A module the host asked for that did not enter the fragment, with the reason. */
+  ExcludedModule,
+  /** The import-map fragment: the response body of `POST /v1/resolve`. */
+  ImportMapFragment,
 } from '@gridmason/protocol';
 
 /**
- * One enabled remote in a host's gate snapshot: an exact, source-qualified
- * `(publisher, tag, version)` the host has decided to load. Versions are **exact**
- * — this cut resolves a pinned version, never a version *set* or range (SCOPE cut:
- * no version sets, GW-D19); the host's gate service already chose the version.
+ * The manifest fields resolution reads (a structural narrowing of {@link Manifest}).
+ * Registry-local: not part of the promoted Resolution API wire contract — it names
+ * only the two manifest fields the resolver consults, so it stays a `Pick` here.
  */
-export interface GateModule {
-  /** Publisher namespace prefix (unique within this registry, SPEC §9). */
-  readonly publisher: string;
-  /** The widget custom-element tag (publisher-prefixed). */
-  readonly tag: string;
-  /** The exact SemVer of the enabled artifact. */
-  readonly version: string;
-}
-
-/**
- * One shared-dependency major the host **shell offers** for a bare specifier:
- * the module URL the shell already provides for major `major`. A widget's manifest
- * `sharedScope` declares the *range* it needs (GW-D22); resolution matches that
- * range against these offers and emits a `scopes` entry when a widget needs a
- * non-default major. The shell owns these URLs — the registry never hosts a shared
- * dependency, it only scopes to what the shell declares (SPEC dashboard §, "never
- * globals").
- */
-export interface SharedOffer {
-  /** The SemVer major the shell offers at {@link url}. */
-  readonly major: number;
-  /** The module URL the shell serves this major from (host-owned). */
-  readonly url: string;
-}
-
-/**
- * A gate snapshot: the request body of `POST /v1/resolve`. The enabled modules the
- * host wants URLs for, plus what the shell offers for each shared specifier so
- * resolution can scope different majors. `shared` is optional — a fragment of
- * fully self-contained widgets needs none.
- */
-export interface GateSnapshot {
-  /**
-   * The registry this snapshot targets — must equal this registry's id
-   * (SPEC §9: the host pins each prefix to one registry, so a snapshot is
-   * single-registry). A mismatch is a configuration error, refused typed.
-   */
-  readonly registry: string;
-  /** The enabled remotes to resolve. May be empty (nothing enabled ⇒ empty fragment). */
-  readonly modules: readonly GateModule[];
-  /** Shared-dependency majors the shell offers, keyed by bare specifier. */
-  readonly shared?: Readonly<Record<string, readonly SharedOffer[]>>;
-}
-
-/**
- * The signature bundle a host verifies before loading a module (SPEC §8, §10) —
- * exactly the material `@gridmason/protocol`'s `verifyRelease` consumes as its
- * *untrusted, network-delivered* inputs (the host supplies the pinned trust roots,
- * CA/countersign roots, log key, and clock out of band). Identical in shape to the
- * serving surface's `GET /v1/releases/:hash` body (#12), so a host verifies a
- * fragment entry with no second fetch.
- */
-export interface SignatureBundle {
-  /** The signed release document ({ path → hash }); canonicalized + bound to the subject. */
-  readonly release: ReleaseDoc;
-  /** The completed dual-signature envelope (publisher + registry countersignature). */
-  readonly envelope: SignatureEnvelope;
-  /** The transparency-log inclusion entry the release was anchored in. */
-  readonly logEntry: TransparencyLogEntry;
-}
-
-/**
- * One resolved module in a fragment: its source-qualified identity, the bare
- * `specifier` it is mapped under in {@link ImportMapFragment.imports}, its
- * hash-pinned entry URL, and the {@link SignatureBundle} that proves the URL.
- */
-export interface ResolvedModule {
-  /** Source registry id — the `source` half of source-qualified identity (SPEC §9). */
-  readonly source: string;
-  /** Publisher prefix that owns the tag on this registry. */
-  readonly publisher: string;
-  /** The widget custom-element tag. */
-  readonly tag: string;
-  /** The exact resolved version. */
-  readonly version: string;
-  /** The bare import-map specifier this module is bound to (`<registry>/<tag>`). */
-  readonly specifier: string;
-  /** The hash-pinned, root-relative serving URL of the entry module (`/v1/artifacts/:hash`). */
-  readonly url: string;
-  /** The verification material for {@link url}. */
-  readonly bundle: SignatureBundle;
-}
-
-/** Why a requested module was not placed in the fragment. Stable machine codes. */
-export type ExclusionReason =
-  /** No publisher owns that prefix on this registry. */
-  | 'unknown_publisher'
-  /** No `(publisher, tag, version)` artifact exists. */
-  | 'unknown_module'
-  /** The artifact is not in a loadable state (revoked, killed, or never approved). */
-  | 'not_distributable'
-  /** The artifact has no countersigned release document (not yet published). */
-  | 'no_release'
-  /** The release document or its manifest is internally inconsistent (missing entry/manifest). */
-  | 'unresolvable_release'
-  /** No shell offer satisfies a widget's `sharedScope` range (GW-D22 resolve-time check). */
-  | 'unsatisfied_shared_scope';
-
-/**
- * A module the host asked for that did not enter the fragment, with the reason.
- * Reported rather than silently dropped so the host can render the SPEC §6/§8
- * fallback card — but a revoked/killed/unknown remote **never enters the import
- * map** (SPEC §6). Echoes only the identity the host itself sent.
- */
-export interface ExcludedModule {
-  readonly publisher: string;
-  readonly tag: string;
-  readonly version: string;
-  readonly reason: ExclusionReason;
-}
-
-/**
- * The import-map fragment: the response body of `POST /v1/resolve`. A native-ESM
- * import map (`imports` + `scopes`, GW-D22) extended with the per-module signature
- * bundles and the excluded list, all qualified by {@link registry} (FR-10).
- */
-export interface ImportMapFragment {
-  /** This registry's id — qualifies every entry for source-qualified merging (SPEC §9). */
-  readonly registry: string;
-  /** Bare specifier → hash-pinned entry URL, one per resolved module. */
-  readonly imports: Readonly<Record<string, string>>;
-  /**
-   * Import-map `scopes`: keyed by a resolved module's entry URL, mapping a shared
-   * specifier to the module-specific major URL. Emitted **only** when a widget
-   * needs a different major than the shell's default (the highest offered) — never
-   * a global override (GW-D22).
-   */
-  readonly scopes: Readonly<Record<string, Readonly<Record<string, string>>>>;
-  /** The resolved modules, carrying their signature bundles. */
-  readonly modules: readonly ResolvedModule[];
-  /** Requested modules that did not resolve, with reasons (never in `imports`). */
-  readonly excluded: readonly ExcludedModule[];
-}
-
-/** The manifest fields resolution reads (a structural narrowing of {@link Manifest}). */
 export type ResolutionManifest = Pick<Manifest, 'entry' | 'sharedScope'>;
