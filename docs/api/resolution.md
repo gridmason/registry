@@ -52,13 +52,21 @@ two registries claim the same prefix is the host's configuration error to reject
 
 ## Only published, countersigned, non-revoked releases resolve
 
-A module resolves only when its `(publisher, tag, version)` names an artifact
-currently in the **`approved`** state *and* backed by a **countersigned release
-document** (the same release #12 serves). Any other state — `revoked`, `killed`,
-`submitted`, `reviewing`, `rejected` — excludes it, so **a revoked or killed remote
-never enters a fragment** (SPEC §6). A future signed revocation/kill feed (#14)
-plugs into the resolver's `RevocationCheck` seam to cross-check the feed's state in
-addition to the artifact lifecycle state.
+A module resolves only when it passes **both** gates (`state ∧ feed`, SPEC §6):
+
+1. **Lifecycle state** — its `(publisher, tag, version)` names an artifact currently
+   in the **`approved`** state *and* backed by a **countersigned release document**
+   (the same release #12 serves). Any other state — `revoked`, `killed`, `submitted`,
+   `reviewing`, `rejected` — excludes it.
+2. **Signed revocation/kill feed** (#14) — the resolver cross-checks the artifact
+   against the registry's signed feed through its `RevocationCheck` seam. A release
+   the feed lists as revoked/killed is excluded **even if** its lifecycle state has
+   not yet been observed as changed — closing the window between a distribution-state
+   write and its feed publication.
+
+So **a revoked or killed remote never enters a fragment**: an operator revoke/kill
+both transitions the artifact out of `approved` and appends a feed entry, and either
+gate alone is sufficient to exclude it.
 
 Unresolvable modules are **reported** in the `excluded` array (so the host can
 render its SPEC §6/§8 fallback card) but are **never** placed in `imports`.
@@ -158,7 +166,7 @@ A requested module that does not resolve appears in `excluded`, never in `import
 |---|---|
 | `unknown_publisher` | No publisher owns that prefix on this registry. |
 | `unknown_module` | No `(publisher, tag, version)` artifact exists. |
-| `not_distributable` | The artifact is not `approved` (revoked, killed, or never approved). |
+| `not_distributable` | The artifact is not `approved` (revoked, killed, or never approved), or the signed feed lists it as revoked/killed. |
 | `no_release` | The artifact has no countersigned release document. |
 | `unresolvable_release` | The release or its manifest is internally inconsistent. |
 | `unsatisfied_shared_scope` | No shell offer satisfies a widget's `sharedScope` range. |

@@ -63,9 +63,9 @@ const DISTRIBUTABLE_STATE = 'approved';
  * A cross-check against the signed revocation/kill feed (#14). The artifact
  * lifecycle `state` is the primary distribution gate here; this seam lets the
  * feed's `FeedEntry` state exclude a release that was revoked/killed out-of-band
- * between the state write and feed publication. Absent (this cut, until #14 lands)
- * resolution relies on `state` alone — see the TODO in {@link resolveGateSnapshot};
- * the audit-completeness pass (#15/#38) wires the real feed check.
+ * between the state write and feed publication. `server.ts` wires it from the
+ * feed-entry store (`isBlocked`); when no feed store is available it is absent and
+ * resolution relies on `state` alone.
  */
 export interface RevocationCheck {
   /** True when the release for this artifact has been revoked or killed via the feed. */
@@ -174,8 +174,9 @@ async function resolveModule(
   // rejected, or still-in-review artifact never enters a fragment (SPEC §6).
   if (artifact.state !== DISTRIBUTABLE_STATE) return 'not_distributable';
 
-  // #14 seam: cross-check the signed revocation/kill feed once it lands. Until then
-  // the `state` gate above is the exclusion (a kill flips the artifact to `killed`).
+  // #14 feed cross-check: exclude a release the signed revocation/kill feed lists,
+  // even when its lifecycle `state` is still `approved` (a revoke/kill reflected in
+  // the feed ahead of the state write). With both gates, resolution is `state ∧ feed`.
   if (deps.revocationCheck) {
     const revoked = await deps.revocationCheck.isRevoked({
       artifactId: artifact.id,

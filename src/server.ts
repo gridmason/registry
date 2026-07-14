@@ -37,6 +37,7 @@ import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
 import { resolutionRoutes } from './http/resolution.js';
+import type { RevocationCheck } from './resolution/index.js';
 import { servingRoutes } from './http/serving.js';
 import { publisherRoutes } from './http/publisher.js';
 import { reviewRoutes } from './http/review.js';
@@ -235,6 +236,23 @@ export async function buildServer(options: BuildServerOptions) {
       });
     }
 
+    // The revocation & kill feed store (#14) is the registry's distribution-state
+    // authority (SPEC §6). It is built here — ahead of both the resolution surface
+    // and the feed's own ops routes below — so the resolution surface can cross-check
+    // it. One instance is shared by both consumers.
+    const feedEntryStore =
+      options.feedEntryStore ??
+      (options.storage ? createPostgresFeedEntryStore(options.storage.postgres) : undefined);
+
+    // Resolution excludes a module on `state ∧ feed` (SPEC §6): the approved-only
+    // state gate AND a cross-check of the signed revocation/kill feed. The feed check
+    // is the seam #13 defined ({@link RevocationCheck}); wire it from the feed store
+    // so a release revoked/killed out-of-band is excluded even before its state write
+    // is observed. Absent a feed store, resolution falls back to the state gate alone.
+    const revocationCheck: RevocationCheck | undefined = feedEntryStore
+      ? { isRevoked: ({ artifactId }) => feedEntryStore.isBlocked(artifactId) }
+      : undefined;
+
     // Resolution API (#13, FR-7/FR-10): the anonymous gate-snapshot → import-map
     // fragment surface. It maps enabled (publisher, tag, version) remotes to
     // hash-pinned serving URLs + signature bundles, so it needs the publisher,
@@ -248,6 +266,7 @@ export async function buildServer(options: BuildServerOptions) {
         releaseDocStore: servingReleaseDocStore,
         objectStore,
         registryId: config.registryId,
+        revocationCheck,
       });
     }
 
@@ -261,20 +280,18 @@ export async function buildServer(options: BuildServerOptions) {
       // mounts only when a separately-held countersign key is configured and a
       // release-doc store is available; otherwise an approval simply records the
       // verdict without publishing a release (the Phase-A author-loop demo shape).
-      const releaseDocStore =
-        options.releaseDocStore ??
-        (options.storage
-          ? createPostgresReleaseDocStore(options.storage.postgres)
-          : undefined);
+      // It reuses the single `servingReleaseDocStore` built for the serving surface
+      // so the whole server has one release-doc store — the same rows countersign
+      // writes are what serving and resolution read (one source of truth).
       let onApprove: Parameters<typeof createHumanReviewLane>[0]['onApprove'];
       let countersignStage: CountersignStage | undefined;
-      if (countersignIdentity && releaseDocStore) {
+      if (countersignIdentity && servingReleaseDocStore) {
         const transparencyLog =
           options.transparencyLog ?? createTransparencyLog(config.transparencyLog);
         countersignStage = createCountersignStage({
           identity: countersignIdentity,
           transparencyLog,
-          releaseDocStore,
+          releaseDocStore: servingReleaseDocStore,
           logger,
         });
         const stage = countersignStage;
@@ -304,10 +321,10 @@ export async function buildServer(options: BuildServerOptions) {
       // countersign stage as the approval hook, so it only mounts when that stage
       // is wired (countersign key + release-doc store) — the same instances that
       // publish releases at all.
-      if (countersignStage && releaseDocStore) {
+      if (countersignStage && servingReleaseDocStore) {
         const redriveService = createReleaseRedriveService({
           artifactStore,
-          releaseDocStore,
+          releaseDocStore: servingReleaseDocStore,
           reviewCaseStore,
           stage: countersignStage,
         });
@@ -321,12 +338,10 @@ export async function buildServer(options: BuildServerOptions) {
 
     // The revocation & kill feed (#14) is the registry's distribution-state
     // authority (SPEC §6). It mounts when the countersign key is configured — the
-    // feed is signed with it so hosts verify against the same trust root — and a
-    // feed-entry store is available. The public feed is anonymous; the revoke/kill
-    // ops endpoints are gated on the config-listed operator set.
-    const feedEntryStore =
-      options.feedEntryStore ??
-      (options.storage ? createPostgresFeedEntryStore(options.storage.postgres) : undefined);
+    // feed is signed with it so hosts verify against the same trust root — and the
+    // feed-entry store (built above, shared with the resolution cross-check) is
+    // available. The public feed is anonymous; the revoke/kill ops endpoints are
+    // gated on the config-listed operator set.
     if (artifactStore && feedEntryStore && countersignIdentity) {
       const service = createRevocationService({ artifactStore, feedEntryStore });
       await app.register(revocationRoutes, {

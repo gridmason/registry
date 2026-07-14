@@ -36,6 +36,7 @@ import { InMemoryPublisherStore } from '../../src/publisher/store.js';
 import { InMemoryReleaseDocStore } from '../../src/release/store.js';
 import type { AutomatedReviewReport } from '../../src/review/report.js';
 import { InMemoryReviewCaseStore } from '../../src/review/store.js';
+import { InMemoryFeedEntryStore } from '../../src/revocation/store.js';
 import { buildServer } from '../../src/server.js';
 import { InMemoryTransparencyLog } from '../../src/sigstore/log.js';
 import { InMemoryObjectStore } from '../../src/storage/object-store.js';
@@ -62,6 +63,7 @@ const REGISTRY_ID = 'registry.test';
 const FUTURE = Math.floor(Date.now() / 1000) + 3600;
 const AUTHOR_SUB = 'author-1';
 const REVIEWER_SUB = 'reviewer-1';
+const OPERATOR_SUB = 'operator-1';
 const ARTIFACT_ID = 'acme-clock@1.2.0';
 
 const report: AutomatedReviewReport = {
@@ -92,6 +94,10 @@ interface Harness {
   publisher: Awaited<ReturnType<typeof makePublisherFixture>>;
   countersign: ReturnType<typeof makeCountersignFixture>;
   log: InMemoryTransparencyLog;
+  /** The seeded artifact's table id — the target of a kill/revoke ops call. */
+  artifactId: string;
+  /** The feed store the server cross-checks; tests append entries to it out of band. */
+  feedEntryStore: InMemoryFeedEntryStore;
 }
 
 async function harness(reviewerToken: string, issuer: FakeIssuer): Promise<Harness> {
@@ -143,7 +149,11 @@ async function harness(reviewerToken: string, issuer: FakeIssuer): Promise<Harne
     LOG_LEVEL: 'silent',
     REGISTRY_ID,
     REVIEW_REVIEWER_IDENTITIES: composeOidcIdentity(issuer.issuer, REVIEWER_SUB),
+    OPS_OPERATOR_IDENTITIES: composeOidcIdentity(issuer.issuer, OPERATOR_SUB),
   });
+  // The feed store is wired so the server builds its resolution revocation-check
+  // seam (`state ∧ feed`, SPEC §6) and mounts the kill/revoke ops endpoints.
+  const feedEntryStore = new InMemoryFeedEntryStore();
   const app = await buildServer({
     config,
     logger: createLogger(config),
@@ -152,6 +162,7 @@ async function harness(reviewerToken: string, issuer: FakeIssuer): Promise<Harne
     objectStore,
     reviewCaseStore,
     releaseDocStore: new InMemoryReleaseDocStore(),
+    feedEntryStore,
     countersignIdentity: loadCountersignIdentity(countersign)!,
     transparencyLog: log,
     oidcVerifier: createOidcVerifier({ issuerAllowlist: [issuer.issuer] }),
@@ -167,7 +178,7 @@ async function harness(reviewerToken: string, issuer: FakeIssuer): Promise<Harne
     throw new Error(`approval did not publish a release: ${verdict.statusCode} ${verdict.payload}`);
   }
 
-  return { app, contentHashes, publisher, countersign, log };
+  return { app, contentHashes, publisher, countersign, log, artifactId: created.record.id, feedEntryStore };
 }
 
 /** The gate snapshot a host with react 18 + 17 available would send for this widget. */
@@ -187,11 +198,13 @@ function gateSnapshot() {
 describe('Resolution API — anonymous fragment, verifiable via @gridmason/protocol', () => {
   let issuer: FakeIssuer;
   let reviewerToken: string;
+  let operatorToken: string;
   let h: Harness;
 
   beforeAll(async () => {
     issuer = await startFakeIssuer();
     reviewerToken = await issuer.sign({ iss: issuer.issuer, sub: REVIEWER_SUB, exp: FUTURE });
+    operatorToken = await issuer.sign({ iss: issuer.issuer, sub: OPERATOR_SUB, exp: FUTURE });
   });
   afterAll(async () => {
     await issuer.close();
@@ -346,5 +359,65 @@ describe('Resolution API — anonymous fragment, verifiable via @gridmason/proto
     const fragment = res.json();
     expect(fragment.modules).toEqual([]);
     expect(fragment.excluded[0].reason).toBe('unknown_module');
+  });
+
+  // The §6 acceptance the batch review flagged as unwired: resolution excludes on
+  // `state ∧ feed`. These two cases cover both halves the wired seam adds.
+  describe('§6 kill/revoke removes a module from the fragment', () => {
+    it('publish → approve → countersign → kill excludes the module (end to end)', async () => {
+      // The module resolves before the kill (the harness already published, approved,
+      // and countersigned it).
+      const before = await h.app.inject({ method: 'POST', url: '/v1/resolve', payload: gateSnapshot() });
+      expect(before.json().modules).toHaveLength(1);
+
+      // An operator kills it through the real ops endpoint (SPEC §6, FR-8): the
+      // artifact leaves `approved` and a `killed` entry lands in the signed feed.
+      const killed = await h.app.inject({
+        method: 'POST',
+        url: `/v1/ops/artifacts/${h.artifactId}/kill`,
+        headers: { authorization: `Bearer ${operatorToken}` },
+        payload: { severity: 'critical', reason: 'actively exploited' },
+      });
+      expect(killed.statusCode).toBe(201);
+      expect(killed.json()).toMatchObject({ artifactState: 'killed', state: 'killed' });
+
+      // The killed remote never enters the import map: it is reported excluded, not
+      // resolved (SPEC §6).
+      const after = await h.app.inject({ method: 'POST', url: '/v1/resolve', payload: gateSnapshot() });
+      expect(after.statusCode).toBe(200);
+      const fragment = after.json();
+      expect(fragment.modules).toEqual([]);
+      expect(fragment.imports).toEqual({});
+      expect(fragment.excluded).toHaveLength(1);
+      expect(fragment.excluded[0]).toMatchObject({
+        publisher: 'acme',
+        tag: 'acme-clock',
+        version: '1.2.0',
+        reason: 'not_distributable',
+      });
+    });
+
+    it('excludes a still-approved artifact the signed feed lists as revoked (feed cross-check)', async () => {
+      // The seam isolated: the artifact stays `approved` (no state transition), so the
+      // state gate alone would resolve it. A revoke entry is appended to the feed out
+      // of band — exactly the "revoked/killed between the state write and feed
+      // publication" case the §6 cross-check exists for.
+      await h.feedEntryStore.append({
+        artifactId: h.artifactId,
+        artifact: ARTIFACT_ID,
+        state: 'revoked',
+        severity: 'high',
+        reason: 'feed-only revocation',
+      });
+
+      const res = await h.app.inject({ method: 'POST', url: '/v1/resolve', payload: gateSnapshot() });
+      expect(res.statusCode).toBe(200);
+      const fragment = res.json();
+      // Excluded by the feed check even though its lifecycle state is still approved —
+      // proof resolution is `state ∧ feed`, not `state` alone.
+      expect(fragment.modules).toEqual([]);
+      expect(fragment.excluded).toHaveLength(1);
+      expect(fragment.excluded[0].reason).toBe('not_distributable');
+    });
   });
 });

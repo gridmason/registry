@@ -89,6 +89,14 @@ export interface FeedEntryStore {
   append(input: AppendFeedEntryInput): Promise<FeedEntryRecord>;
   /** The current feed snapshot: monotonic version + the artifacts to block. */
   snapshot(): Promise<FeedSnapshot>;
+  /**
+   * True when this artifact's latest feed entry still blocks loading (it is
+   * revoked or killed). The resolution surface (#13) calls this as its §6 signed-
+   * feed cross-check, so a release revoked/killed out-of-band — reflected in the
+   * feed independent of the artifact `state` write — never enters an import-map
+   * fragment (resolution excludes on `state ∧ feed`).
+   */
+  isBlocked(artifactId: string): Promise<boolean>;
 }
 
 interface FeedEntryRow {
@@ -165,6 +173,23 @@ export function createPostgresFeedEntryStore(postgres: Postgres): FeedEntryStore
       const seq = Number((maxResult.rows[0] as { seq: string }).seq);
       return { seq, entries };
     },
+
+    async isBlocked(artifactId) {
+      // The artifact's highest-seq entry is its current feed state — an artifact
+      // only escalates (approved → revoked → killed), never back. This cut only
+      // writes revoke/kill so any entry blocks, but checking the state keeps it
+      // correct should a non-blocking transition ever be published.
+      const { rows } = await postgres.query(
+        `SELECT state FROM feed_entry
+          WHERE artifact_id = $1
+          ORDER BY seq DESC
+          LIMIT 1`,
+        [artifactId],
+      );
+      if (rows.length === 0) return false;
+      const state = (rows[0] as { state: string }).state;
+      return state === 'revoked' || state === 'killed';
+    },
   };
 }
 
@@ -207,5 +232,15 @@ export class InMemoryFeedEntryStore implements FeedEntryStore {
         reason: row.reason,
       }));
     return Promise.resolve({ seq: this.seqCounter, entries });
+  }
+
+  isBlocked(artifactId: string): Promise<boolean> {
+    // Rows are append-ordered, so the last match for this artifact is its latest.
+    let latest: FeedEntryRecord | undefined;
+    for (const row of this.rows) {
+      if (row.artifactId === artifactId) latest = row;
+    }
+    if (latest === undefined) return Promise.resolve(false);
+    return Promise.resolve(latest.state === 'revoked' || latest.state === 'killed');
   }
 }
