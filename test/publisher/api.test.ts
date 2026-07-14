@@ -1,46 +1,45 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import type { AuditEvent } from '../../src/audit/index.js';
 import { noopAuditSink, setAuditSink } from '../../src/audit/index.js';
+import { createOidcVerifier } from '../../src/auth/oidc.js';
 import { loadConfig } from '../../src/config/index.js';
 import { createLogger } from '../../src/logging/index.js';
 import { InMemoryPublisherStore } from '../../src/publisher/store.js';
+import { composeOidcIdentity } from '../../src/publisher/types.js';
 import { buildServer } from '../../src/server.js';
+import { startFakeIssuer, type FakeIssuer } from '../helpers/oidc-issuer.js';
 
-const ISSUER = 'https://accounts.example.com';
 const REGISTRY_ID = 'registry.test';
+const FUTURE = Math.floor(Date.now() / 1000) + 3600;
 
-const config = loadConfig({
-  LOG_LEVEL: 'silent',
-  REGISTRY_ID,
-  OIDC_ISSUER_ALLOWLIST: ISSUER,
-});
+const config = loadConfig({ LOG_LEVEL: 'silent', REGISTRY_ID });
 const logger = createLogger(config);
-
-function makeToken(claims: Record<string, unknown>): string {
-  const encode = (obj: unknown): string =>
-    Buffer.from(JSON.stringify(obj)).toString('base64url');
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claims)}.sig`;
-}
-
-const validToken = makeToken({
-  iss: ISSUER,
-  sub: 'user-1',
-  exp: Math.floor(Date.now() / 1000) + 3600,
-});
 
 function auth(token: string): Record<string, string> {
   return { authorization: `Bearer ${token}` };
 }
 
 describe('publisher API', () => {
+  let issuer: FakeIssuer;
+  let validToken: string;
   let app: Awaited<ReturnType<typeof buildServer>>;
   let store: InMemoryPublisherStore;
   let audit: AuditEvent[];
 
+  beforeAll(async () => {
+    issuer = await startFakeIssuer();
+    validToken = await issuer.sign({ iss: issuer.issuer, sub: 'user-1', exp: FUTURE });
+  });
+
+  afterAll(async () => {
+    await issuer.close();
+  });
+
   beforeEach(async () => {
     store = new InMemoryPublisherStore();
-    app = await buildServer({ config, logger, publisherStore: store });
+    const verifier = createOidcVerifier({ issuerAllowlist: [issuer.issuer] });
+    app = await buildServer({ config, logger, publisherStore: store, oidcVerifier: verifier });
     audit = [];
     setAuditSink({ emit: (event) => audit.push(event) });
   });
@@ -62,7 +61,7 @@ describe('publisher API', () => {
     const body = res.json();
     expect(body).toMatchObject({
       registryId: REGISTRY_ID,
-      identity: { issuer: ISSUER, subject: 'user-1' },
+      identity: { issuer: issuer.issuer, subject: 'user-1' },
       prefix: 'acme',
       tier: 'verified',
       publishedVersions: [],
@@ -73,7 +72,7 @@ describe('publisher API', () => {
     expect(audit.map((e) => e.action)).toEqual(['publisher.register', 'prefix.claim']);
     const claim = audit.find((e) => e.action === 'prefix.claim');
     expect(claim?.subject).toBe(`${REGISTRY_ID}/acme`);
-    expect(claim?.actor).toBe(`${ISSUER} user-1`);
+    expect(claim?.actor).toBe(composeOidcIdentity(issuer.issuer, 'user-1'));
   });
 
   it('defaults an omitted tier to community', async () => {
@@ -88,7 +87,7 @@ describe('publisher API', () => {
   });
 
   it('rejects a prefix already claimed on this registry with 409', async () => {
-    await store.register({ issuer: ISSUER, subject: 'other', prefix: 'acme', tier: 'community' });
+    await store.register({ issuer: issuer.issuer, subject: 'other', prefix: 'acme', tier: 'community' });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/publishers',
@@ -99,8 +98,8 @@ describe('publisher API', () => {
     expect(res.json().error.code).toBe('prefix_taken');
   });
 
-  it('rejects a token from a non-allowlisted issuer with 403', async () => {
-    const token = makeToken({ iss: 'https://evil.example', sub: 'user-1' });
+  it('rejects a token from a non-allowlisted issuer with 403 and audits the denial', async () => {
+    const token = await issuer.sign({ iss: 'https://evil.example', sub: 'user-1', exp: FUTURE });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/publishers',
@@ -109,10 +108,34 @@ describe('publisher API', () => {
     });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('issuer_not_allowed');
-    expect(audit).toHaveLength(0);
+    expect(audit).toEqual([
+      expect.objectContaining({
+        actor: 'anonymous',
+        action: 'publisher.register.denied',
+        subject: 'register:issuer-not-allowed',
+      }),
+    ]);
   });
 
-  it('rejects a missing bearer token with 401', async () => {
+  it('rejects a token whose signature does not verify with 401 and audits the denial', async () => {
+    const token = await issuer.signWithWrongKey({ iss: issuer.issuer, sub: 'user-1', exp: FUTURE });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/publishers',
+      headers: auth(token),
+      payload: { prefix: 'acme' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error.code).toBe('invalid_token');
+    expect(audit).toEqual([
+      expect.objectContaining({
+        action: 'publisher.register.denied',
+        subject: 'register:invalid-signature',
+      }),
+    ]);
+  });
+
+  it('rejects a missing bearer token with 401 without auditing', async () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/publishers',
@@ -120,10 +143,11 @@ describe('publisher API', () => {
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().error.code).toBe('missing_token');
+    expect(audit).toHaveLength(0);
   });
 
   it('rejects an expired token with 401', async () => {
-    const token = makeToken({ iss: ISSUER, sub: 'user-1', exp: 1000 });
+    const token = await issuer.sign({ iss: issuer.issuer, sub: 'user-1', exp: 1000 });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/publishers',
@@ -183,7 +207,7 @@ describe('publisher API', () => {
     expect(res.json()).toMatchObject({
       prefix: 'acme',
       registryId: REGISTRY_ID,
-      owner: { issuer: ISSUER, subject: 'user-1' },
+      owner: { issuer: issuer.issuer, subject: 'user-1' },
     });
   });
 

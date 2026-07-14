@@ -16,6 +16,7 @@ describe('loadConfig', () => {
       registryId: 'registry.local',
       oidc: {
         issuerAllowlist: [],
+        audience: '',
       },
       postgres: {
         url: 'postgres://gridmason:gridmason@localhost:5432/gridmason',
@@ -90,6 +91,13 @@ describe('loadConfig', () => {
 
   it('defaults the OIDC issuer allowlist to empty (fail closed)', () => {
     expect(loadConfig({}).oidc.issuerAllowlist).toEqual([]);
+  });
+
+  it('reads the OIDC audience and defaults it to empty (unchecked)', () => {
+    expect(loadConfig({}).oidc.audience).toBe('');
+    expect(loadConfig({ OIDC_AUDIENCE: 'registry.example.com' }).oidc.audience).toBe(
+      'registry.example.com',
+    );
   });
 
   it('accepts 1/0 as booleans and rejects other strings', () => {

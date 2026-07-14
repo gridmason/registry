@@ -12,6 +12,7 @@
  * driver error.
  */
 import type { Postgres } from '../db/postgres.js';
+import type { Logger } from '../logging/index.js';
 import {
   composeOidcIdentity,
   type PublisherRecord,
@@ -68,22 +69,41 @@ function rowToRecord(row: PublisherRow): PublisherRecord {
 const SELECT_COLUMNS =
   'id, oidc_issuer, oidc_subject, prefix, tier, created_at';
 
-/** Map a Postgres unique-violation to the invariant it broke, or `null`. */
-function conflictOf(err: unknown): PublisherConflict | null {
+// The unique constraints (index names, migration 0001) whose violation maps to
+// a typed conflict. Classification is by the *exact* constraint name, never a
+// substring guess, so a violation of any other unique constraint added later is
+// not silently mislabeled as one of these.
+const PREFIX_CONSTRAINT = 'publisher_prefix_key';
+const IDENTITY_CONSTRAINT = 'publisher_oidc_identity_key';
+
+/**
+ * Map a Postgres unique-violation (SQLSTATE 23505) to the invariant it broke.
+ * An unrecognised constraint returns `null`: the raw error then propagates (a
+ * 500) rather than being reported as a false `prefix`/`identity` conflict, and
+ * the constraint is logged so the unhandled case is visible.
+ */
+function conflictOf(err: unknown, logger?: Logger): PublisherConflict | null {
   if (typeof err !== 'object' || err === null) return null;
-  const { code, constraint, detail } = err as {
-    code?: string;
-    constraint?: string;
-    detail?: string;
-  };
+  const { code, constraint } = err as { code?: string; constraint?: string };
   if (code !== '23505') return null;
-  const hint = `${constraint ?? ''} ${detail ?? ''}`;
-  if (hint.includes('prefix')) return 'prefix';
-  if (hint.includes('oidc')) return 'identity';
-  return null;
+  switch (constraint) {
+    case PREFIX_CONSTRAINT:
+      return 'prefix';
+    case IDENTITY_CONSTRAINT:
+      return 'identity';
+    default:
+      logger?.warn(
+        { code, constraint },
+        'unclassified unique violation on publisher insert; surfacing as 500',
+      );
+      return null;
+  }
 }
 
-export function createPostgresPublisherStore(postgres: Postgres): PublisherStore {
+export function createPostgresPublisherStore(
+  postgres: Postgres,
+  logger?: Logger,
+): PublisherStore {
   return {
     async register(input) {
       const identity = composeOidcIdentity(input.issuer, input.subject);
@@ -96,7 +116,7 @@ export function createPostgresPublisherStore(postgres: Postgres): PublisherStore
         );
         return { ok: true, record: rowToRecord(rows[0] as PublisherRow) };
       } catch (err) {
-        const conflict = conflictOf(err);
+        const conflict = conflictOf(err, logger);
         if (conflict) return { ok: false, conflict };
         throw err;
       }

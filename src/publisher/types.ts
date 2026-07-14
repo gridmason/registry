@@ -43,13 +43,17 @@ export interface PublisherRecord {
 
 /**
  * Canonical composite of the identity claims, stored in the `oidc_identity`
- * column whose unique index is the per-registry identity key. Issuers are URLs
- * and subjects are opaque ids — neither contains whitespace — so a single space
- * is an unambiguous, human-readable separator (and, unlike NUL, is a legal
- * Postgres `text` value).
+ * column whose unique index is the per-registry identity key. Each part is
+ * percent-encoded before joining, so the composition is injective: two distinct
+ * `(issuer, subject)` pairs can never collide on the separator (e.g. issuer
+ * `a b` + subject `c` must not equal issuer `a` + subject `b c`). Encoding maps a
+ * literal space to `%20`, so a single space stays an unambiguous separator and
+ * the composite remains a legal Postgres `text` value. `composeOidcIdentity` is
+ * the sole producer of this value (store insert + audit actor), so every stored
+ * and compared instance is encoded consistently.
  */
 export function composeOidcIdentity(issuer: string, subject: string): string {
-  return `${issuer} ${subject}`;
+  return `${encodeURIComponent(issuer)} ${encodeURIComponent(subject)}`;
 }
 
 /** Why a prefix was rejected. Callers switch on the code, not the message. */

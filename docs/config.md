@@ -24,10 +24,17 @@ anchor** (SPEC §2). See [`api/publisher.md`](api/publisher.md).
 | Variable | Default | Description |
 |---|---|---|
 | `OIDC_ISSUER_ALLOWLIST` | *(empty)* | Comma-separated list of trusted OIDC issuer URLs. A registration's bearer token is accepted only when its `iss` claim is one of these. **Empty means no issuer is trusted, so no publisher can register (fail closed)** — an instance must set at least one issuer before it accepts registrations. |
+| `OIDC_AUDIENCE` | *(empty)* | Required token audience (`aud`). When set, a registration token is accepted only if its `aud` claim includes this value; empty means the audience is not checked. Set it to this registry's canonical id so a token minted for a different relying party cannot be replayed here. |
 
-> Token **signature** verification against the issuer JWKS is deferred this phase
-> (GW-D19 SCOPE cut): the allowlist + claim binding are enforced, full keyless
-> verification lands with the signing/countersign work.
+> The registration token's **signature is verified** against the issuer's
+> published keys: for the token's `iss` (which must be on the allowlist), the
+> registry performs OIDC discovery (`<issuer>/.well-known/openid-configuration`),
+> fetches the `jwks_uri` key set (cached, with automatic refetch on key
+> rotation), and verifies the signature before any claim is trusted. Only
+> asymmetric algorithms are accepted — `alg: none` and the `HS*` family are
+> refused (alg-confusion guard) — and `exp`/`nbf` are enforced. If the issuer's
+> discovery or JWKS endpoint cannot be reached, verification **fails closed** and
+> the request is rejected (HTTP `503`), never accepted unverified.
 
 ## Storage
 

@@ -15,12 +15,20 @@ claims. The **issuer is the trust anchor** (SPEC §2): each registry configures 
 explicit issuer allowlist (`OIDC_ISSUER_ALLOWLIST`, see
 [`config.md`](../config.md)) and refuses a token from any other issuer.
 
-> **Signature verification is deferred this phase (GW-D19 SCOPE cut).** The
-> registry validates the token's claims and enforces the issuer allowlist, but
-> does not yet cryptographically verify the token signature against the issuer's
-> JWKS. Full keyless verification lands with the signing/countersign work and the
-> `@gridmason/protocol` verify lib. Do not treat a registration as
-> cryptographically attested until then.
+The token is **cryptographically verified**, not merely inspected. For the
+token's `iss` — which must be on the allowlist (`OIDC_ISSUER_ALLOWLIST`) — the
+registry runs OIDC discovery (`<issuer>/.well-known/openid-configuration`),
+fetches the issuer's `jwks_uri` key set (cached, with automatic refetch on key
+rotation), and verifies the signature before any claim is believed. The
+allowlist is checked first, so the registry only ever contacts issuers it already
+trusts. Verification:
+
+- accepts **asymmetric algorithms only** — `alg: none` and the `HS*` family are
+  refused, closing the alg-confusion bypass;
+- enforces `exp` and `nbf` (with a small clock-skew tolerance);
+- enforces `aud` when `OIDC_AUDIENCE` is configured;
+- **fails closed**: if the issuer's discovery or JWKS endpoint is unreachable the
+  request is rejected (`503`), never accepted unverified.
 
 ## Namespace prefix
 
@@ -77,14 +85,20 @@ Responses:
 | `400` | `invalid_request` | body missing `prefix`, or an invalid `tier` |
 | `400` | `invalid_prefix` | `prefix` fails the format rules |
 | `401` | `missing_token` | no bearer token |
-| `401` | `invalid_token` | token malformed or missing `iss`/`sub` |
+| `401` | `invalid_token` | token malformed, missing `iss`/`sub`, or its **signature does not verify** against the issuer JWKS (includes `alg: none`/`HS*`) |
 | `401` | `token_expired` | token `exp` is in the past |
+| `401` | `token_not_yet_valid` | token `nbf` is in the future |
 | `403` | `issuer_not_allowed` | token issuer not on the allowlist |
+| `403` | `audience_not_allowed` | token `aud` does not include the configured `OIDC_AUDIENCE` |
 | `409` | `prefix_taken` | prefix already claimed on this registry |
 | `409` | `publisher_exists` | this identity already has a publisher record |
+| `503` | `verification_unavailable` | the issuer's discovery/JWKS endpoint could not be reached (fail closed — retryable) |
 
-Emits two `AuditEvent`s (FR-12): `publisher.register` (subject = publisher id)
-and `prefix.claim` (subject = `<registryId>/<prefix>`), actor = `<issuer> <subject>`.
+On success, emits two `AuditEvent`s (FR-12): `publisher.register` (subject =
+publisher id) and `prefix.claim` (subject = `<registryId>/<prefix>`), actor =
+`<issuer> <subject>`. A rejected token emits a `publisher.register.denied` event
+(actor `anonymous`, subject `register:<reason>`) — the token failed verification,
+so its claims are not trusted as an identity.
 
 ### `GET /v1/publishers/:id` — read a publisher record
 

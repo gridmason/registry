@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Postgres } from '../../src/db/postgres.js';
+import type { Logger } from '../../src/logging/index.js';
 import {
   createPostgresPublisherStore,
   InMemoryPublisherStore,
@@ -110,5 +111,18 @@ describe('createPostgresPublisherStore', () => {
     const err = { code: '08006', message: 'connection failure' };
     const store = createPostgresPublisherStore(fakePostgres([], err));
     await expect(store.register(input)).rejects.toBe(err);
+  });
+
+  it('rethrows an unrecognised unique violation and logs its constraint (no false conflict)', async () => {
+    // A 23505 on some constraint other than the two known ones must NOT be
+    // reported as a prefix/identity conflict: it propagates (a 500) and is logged.
+    const err = { code: '23505', constraint: 'publisher_future_unique_key' };
+    const warnings: Array<Record<string, unknown>> = [];
+    const logger = { warn: (obj: Record<string, unknown>) => warnings.push(obj) } as unknown as Logger;
+    const store = createPostgresPublisherStore(fakePostgres([], err), logger);
+    await expect(store.register(input)).rejects.toBe(err);
+    expect(warnings).toEqual([
+      expect.objectContaining({ code: '23505', constraint: 'publisher_future_unique_key' }),
+    ]);
   });
 });
