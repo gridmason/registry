@@ -108,6 +108,38 @@ export interface CountersignConfig {
   readonly certificatePem: string;
 }
 
+/**
+ * Signed revocation & kill feed settings (SPEC §6, FR-8). The registry owns
+ * distribution state and publishes it as a signed feed; these tune how it is
+ * served. The feed is signed with the countersign key ({@link CountersignConfig})
+ * so hosts verify it against the same trust root — no separate feed key.
+ */
+export interface RevocationConfig {
+  /**
+   * Freshness window (seconds) stamped on each served feed: how long a host may
+   * cache before it MUST re-check (fail-closed, scoped to this registry). Bounded
+   * at 24 h (SPEC §6 max TTL); the default is 1 h so a kill propagates within the
+   * §6 online bound (≤ 1 h) — a shorter TTL forces hosts to re-check sooner.
+   */
+  readonly feedTtlSeconds: number;
+}
+
+/**
+ * Registry operator settings (SPEC §6, §8 Ops API). The SCOPE-minimal cut ships
+ * no operator console; the operators permitted to issue a revoke/kill are a
+ * config-listed identity set (the same pattern as the reviewer roster,
+ * {@link ReviewConfig.reviewerIdentities}).
+ */
+export interface OpsConfig {
+  /**
+   * The OIDC identities permitted to issue a revoke/kill, in the canonical
+   * `composeOidcIdentity` composite form. Empty means no identity can operate the
+   * kill switch (fail closed) — an instance must configure at least one operator
+   * before the ops surface will act.
+   */
+  readonly operatorIdentities: readonly string[];
+}
+
 /** Which transparency log the countersign stage anchors releases in. */
 export type TransparencyLogDriver = 'memory' | 'rekor';
 
@@ -200,6 +232,10 @@ export interface Config {
   readonly review: ReviewConfig;
   /** Registry countersignature key custody (held separately from review staff). */
   readonly countersign: CountersignConfig;
+  /** Signed revocation & kill feed settings. */
+  readonly revocation: RevocationConfig;
+  /** Registry operator settings (the identities permitted to revoke/kill). */
+  readonly ops: OpsConfig;
   /** Transparency-log settings the countersign stage anchors releases in. */
   readonly transparencyLog: TransparencyLogConfig;
   /** HTTP transport caps. */
@@ -353,6 +389,17 @@ export function loadConfig(env: Env = process.env): Config {
       // PEM newlines; normalize them back so a projected secret works either way.
       privateKeyPem: readPem(env, 'COUNTERSIGN_PRIVATE_KEY'),
       certificatePem: readPem(env, 'COUNTERSIGN_CERTIFICATE'),
+    },
+    revocation: {
+      // Bounded at the SPEC §6 max TTL (24 h); defaults to 1 h so a kill lands
+      // within the online propagation bound.
+      feedTtlSeconds: readInt(env, 'REVOCATION_FEED_TTL_SECONDS', 3_600, {
+        min: 1,
+        max: 86_400,
+      }),
+    },
+    ops: {
+      operatorIdentities: readStringList(env, 'OPS_OPERATOR_IDENTITIES', []),
     },
     transparencyLog: {
       driver: readEnum(env, 'TRANSPARENCY_LOG_DRIVER', 'memory', [
