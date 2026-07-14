@@ -76,7 +76,7 @@ export async function buildServer(options: BuildServerOptions) {
   const publisherStore =
     options.publisherStore ??
     (options.storage
-      ? createPostgresPublisherStore(options.storage.postgres)
+      ? createPostgresPublisherStore(options.storage.postgres, logger)
       : undefined);
   if (publisherStore) {
     const verifier =

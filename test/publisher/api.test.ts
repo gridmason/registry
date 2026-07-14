@@ -6,6 +6,7 @@ import { createOidcVerifier } from '../../src/auth/oidc.js';
 import { loadConfig } from '../../src/config/index.js';
 import { createLogger } from '../../src/logging/index.js';
 import { InMemoryPublisherStore } from '../../src/publisher/store.js';
+import { composeOidcIdentity } from '../../src/publisher/types.js';
 import { buildServer } from '../../src/server.js';
 import { startFakeIssuer, type FakeIssuer } from '../helpers/oidc-issuer.js';
 
@@ -71,7 +72,7 @@ describe('publisher API', () => {
     expect(audit.map((e) => e.action)).toEqual(['publisher.register', 'prefix.claim']);
     const claim = audit.find((e) => e.action === 'prefix.claim');
     expect(claim?.subject).toBe(`${REGISTRY_ID}/acme`);
-    expect(claim?.actor).toBe(`${issuer.issuer} user-1`);
+    expect(claim?.actor).toBe(composeOidcIdentity(issuer.issuer, 'user-1'));
   });
 
   it('defaults an omitted tier to community', async () => {
