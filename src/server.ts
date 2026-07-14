@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 
 import Fastify from 'fastify';
 
+import { createOidcVerifier, type OidcVerifier } from './auth/oidc.js';
 import type { Config } from './config/index.js';
 import { healthRoutes } from './http/health.js';
 import { publisherRoutes } from './http/publisher.js';
@@ -37,6 +38,12 @@ export interface BuildServerOptions {
    * inject an in-memory store. Absent both, the publisher routes are not mounted.
    */
   publisherStore?: PublisherStore;
+  /**
+   * OIDC verifier backing publisher registration. Defaults to one built from
+   * `config.oidc` (real discovery + JWKS). Tests inject a verifier wired to a
+   * local fake issuer so no network is touched.
+   */
+  oidcVerifier?: OidcVerifier;
 }
 
 export async function buildServer(options: BuildServerOptions) {
@@ -72,10 +79,16 @@ export async function buildServer(options: BuildServerOptions) {
       ? createPostgresPublisherStore(options.storage.postgres)
       : undefined);
   if (publisherStore) {
+    const verifier =
+      options.oidcVerifier ??
+      createOidcVerifier({
+        issuerAllowlist: config.oidc.issuerAllowlist,
+        audience: config.oidc.audience === '' ? undefined : config.oidc.audience,
+      });
     await app.register(publisherRoutes, {
       store: publisherStore,
       registryId: config.registryId,
-      issuerAllowlist: config.oidc.issuerAllowlist,
+      verifier,
     });
   }
 

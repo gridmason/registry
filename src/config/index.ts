@@ -50,6 +50,13 @@ export interface OidcConfig {
    * one issuer before it accepts registrations.
    */
   readonly issuerAllowlist: readonly string[];
+  /**
+   * Required token audience (`aud`). When set, a registration token is accepted
+   * only if its `aud` claim includes this value; when empty the audience is not
+   * checked. Set it to this registry's canonical id so a token minted for a
+   * different relying party cannot be replayed here.
+   */
+  readonly audience: string;
 }
 
 /** S3-compatible object-store settings (artifacts, release docs, feeds). */
@@ -192,6 +199,7 @@ export function loadConfig(env: Env = process.env): Config {
     registryId: readString(env, 'REGISTRY_ID', 'registry.local'),
     oidc: {
       issuerAllowlist: readStringList(env, 'OIDC_ISSUER_ALLOWLIST', []),
+      audience: readString(env, 'OIDC_AUDIENCE', ''),
     },
     postgres: {
       // Default targets the local dev compose (see compose.yaml). Production
