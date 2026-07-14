@@ -56,6 +56,21 @@ export interface ReleaseDocStore {
   create(input: CreateReleaseDocInput): Promise<ReleaseDocRecord>;
   /** The release document for an artifact, or `null` if none has been emitted. */
   findByArtifact(artifactId: string): Promise<ReleaseDocRecord | null>;
+  /**
+   * A served path that a signed release document maps to `hash`, or `null` when
+   * no signed release lists that content hash. This is the serving surface's
+   * authority check (#12): only a hash pinned by a countersigned release is
+   * servable, so an unknown hash — or the source archive, which no release doc
+   * lists — refuses. The returned path (any one, when several map to the same
+   * bytes) carries the extension the serving route infers a content type from.
+   */
+  findServedPathForHash(hash: string): Promise<string | null>;
+  /**
+   * The release document whose signed subject hashes to `releaseHash`, or `null`
+   * if none. Backs the countersigned release-doc fetch (#12): a host addresses a
+   * release by the hash its publisher signed (`subject.releaseHash`).
+   */
+  findByReleaseHash(releaseHash: string): Promise<ReleaseDocRecord | null>;
 }
 
 interface ReleaseDocRow {
@@ -126,6 +141,33 @@ export function createPostgresReleaseDocStore(postgres: Postgres): ReleaseDocSto
       );
       return rows[0] ? rowToRecord(rows[0] as ReleaseDocRow) : null;
     },
+
+    async findServedPathForHash(hash) {
+      // `paths` is a `{ served path → content hash }` object; expand it to rows
+      // and return the first key whose value is this hash. A hit proves the hash
+      // is pinned by a signed release (servable); the key gives the extension the
+      // route types the response with.
+      const { rows } = await postgres.query(
+        `SELECT entry.key AS path
+           FROM release_doc,
+                jsonb_each_text(release_doc.paths) AS entry
+          WHERE entry.value = $1
+          LIMIT 1`,
+        [hash],
+      );
+      return rows[0] ? (rows[0] as { path: string }).path : null;
+    },
+
+    async findByReleaseHash(releaseHash) {
+      // The signed release hash lives in the envelope subject the publisher signed.
+      const { rows } = await postgres.query(
+        `SELECT ${SELECT_COLUMNS} FROM release_doc
+          WHERE envelope -> 'subject' ->> 'releaseHash' = $1
+          LIMIT 1`,
+        [releaseHash],
+      );
+      return rows[0] ? rowToRecord(rows[0] as ReleaseDocRow) : null;
+    },
   };
 }
 
@@ -160,6 +202,21 @@ export class InMemoryReleaseDocStore implements ReleaseDocStore {
   findByArtifact(artifactId: string): Promise<ReleaseDocRecord | null> {
     return Promise.resolve(
       this.records.find((r) => r.artifactId === artifactId) ?? null,
+    );
+  }
+
+  findServedPathForHash(hash: string): Promise<string | null> {
+    for (const record of this.records) {
+      for (const [path, value] of Object.entries(record.releaseDoc.files)) {
+        if (value === hash) return Promise.resolve(path);
+      }
+    }
+    return Promise.resolve(null);
+  }
+
+  findByReleaseHash(releaseHash: string): Promise<ReleaseDocRecord | null> {
+    return Promise.resolve(
+      this.records.find((r) => r.envelope.subject.releaseHash === releaseHash) ?? null,
     );
   }
 }

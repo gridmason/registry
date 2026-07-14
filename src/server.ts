@@ -25,6 +25,7 @@ import { createPostgresReleaseDocStore, type ReleaseDocStore } from './release/s
 import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
+import { servingRoutes } from './http/serving.js';
 import { publisherRoutes } from './http/publisher.js';
 import { reviewRoutes } from './http/review.js';
 import {
@@ -130,6 +131,23 @@ export async function buildServer(options: BuildServerOptions) {
     readiness,
     serviceName: config.serviceName,
   });
+
+  // Serving surface (#12): the anonymous, read-only, hash-addressed read origin
+  // (blobs + countersigned release docs). It sits off the control-plane path
+  // (SPEC §10), so it mounts on its own — independent of the publish/review
+  // surface below — whenever an object store and a release-doc store are wired.
+  const servingObjectStore = options.objectStore ?? options.storage?.objectStore;
+  const servingReleaseDocStore =
+    options.releaseDocStore ??
+    (options.storage
+      ? createPostgresReleaseDocStore(options.storage.postgres)
+      : undefined);
+  if (servingObjectStore && servingReleaseDocStore) {
+    await app.register(servingRoutes, {
+      objectStore: servingObjectStore,
+      releaseDocStore: servingReleaseDocStore,
+    });
+  }
 
   const publisherStore =
     options.publisherStore ??
