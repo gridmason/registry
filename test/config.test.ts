@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { ConfigError, loadConfig } from '../src/config/index.js';
+import { collectBootWarnings, ConfigError, loadConfig } from '../src/config/index.js';
 
 describe('loadConfig', () => {
   it('applies documented defaults for an empty environment', () => {
@@ -26,10 +26,17 @@ describe('loadConfig', () => {
         privateKeyPem: '',
         certificatePem: '',
       },
+      revocation: {
+        feedTtlSeconds: 3_600,
+      },
+      ops: {
+        operatorIdentities: [],
+      },
       transparencyLog: {
         driver: 'memory',
         rekorUrl: 'https://rekor.sigstore.dev',
         origin: 'registry.local',
+        allowMemoryInProduction: false,
       },
       http: {
         bodyLimitBytes: 65_536,
@@ -60,6 +67,9 @@ describe('loadConfig', () => {
       SERVICE_NAME: 'registry-test',
       REQUEST_ID_HEADER: 'X-Correlation-Id',
       SHUTDOWN_TIMEOUT_MS: '5000',
+      // Production refuses the in-process log (see the transparency-log boot tests);
+      // this case is about the unrelated coercions, so pin a durable driver.
+      TRANSPARENCY_LOG_DRIVER: 'rekor',
     });
     expect(config.nodeEnv).toBe('production');
     expect(config.host).toBe('127.0.0.1');
@@ -128,6 +138,24 @@ describe('loadConfig', () => {
     expect(config.countersign.certificatePem).toContain('\nabc\n');
   });
 
+  it('reads the operator set and feed TTL, defaulting the TTL to 1 h and the set to empty', () => {
+    expect(loadConfig({}).ops.operatorIdentities).toEqual([]);
+    expect(loadConfig({}).revocation.feedTtlSeconds).toBe(3_600);
+    const config = loadConfig({
+      OPS_OPERATOR_IDENTITIES: 'https%3A%2F%2Fissuer op-1 , https%3A%2F%2Fissuer op-2',
+      REVOCATION_FEED_TTL_SECONDS: '600',
+    });
+    expect(config.ops.operatorIdentities).toEqual([
+      'https%3A%2F%2Fissuer op-1',
+      'https%3A%2F%2Fissuer op-2',
+    ]);
+    expect(config.revocation.feedTtlSeconds).toBe(600);
+  });
+
+  it('rejects a feed TTL above the SPEC §6 24 h max', () => {
+    expect(() => loadConfig({ REVOCATION_FEED_TTL_SECONDS: '86401' })).toThrow(ConfigError);
+  });
+
   it('defaults the transparency log to the in-process driver and names it after the registry', () => {
     const config = loadConfig({ REGISTRY_ID: 'registry.example' });
     expect(config.transparencyLog.driver).toBe('memory');
@@ -144,11 +172,73 @@ describe('loadConfig', () => {
       driver: 'rekor',
       rekorUrl: 'https://rekor.example',
       origin: 'log.example',
+      allowMemoryInProduction: false,
     });
   });
 
   it('rejects an unknown transparency-log driver', () => {
     expect(() => loadConfig({ TRANSPARENCY_LOG_DRIVER: 'sqlite' })).toThrow(ConfigError);
+  });
+
+  describe('transparency-log boot validation (#38)', () => {
+    // The matrix: production + memory is refused unless explicitly overridden; every
+    // other combination boots.
+    it('refuses the in-process log in production without an override', () => {
+      expect(() =>
+        loadConfig({ NODE_ENV: 'production', TRANSPARENCY_LOG_DRIVER: 'memory' }),
+      ).toThrow(ConfigError);
+      // The default driver is `memory`, so production with no driver set is refused too.
+      expect(() => loadConfig({ NODE_ENV: 'production' })).toThrow(ConfigError);
+    });
+
+    it('allows the in-process log in production with the explicit override', () => {
+      const config = loadConfig({
+        NODE_ENV: 'production',
+        TRANSPARENCY_LOG_DRIVER: 'memory',
+        TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION: 'true',
+      });
+      expect(config.transparencyLog).toMatchObject({
+        driver: 'memory',
+        allowMemoryInProduction: true,
+      });
+    });
+
+    it('allows the Rekor driver in production without an override', () => {
+      expect(() =>
+        loadConfig({ NODE_ENV: 'production', TRANSPARENCY_LOG_DRIVER: 'rekor' }),
+      ).not.toThrow();
+    });
+
+    it('keeps the in-process log as the zero-config default outside production', () => {
+      for (const nodeEnv of ['development', 'test']) {
+        const config = loadConfig({ NODE_ENV: nodeEnv });
+        expect(config.transparencyLog.driver).toBe('memory');
+      }
+    });
+  });
+
+  describe('collectBootWarnings (#38)', () => {
+    it('warns when a non-production instance runs the in-process log', () => {
+      const warnings = collectBootWarnings(loadConfig({ NODE_ENV: 'development' }));
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/memory/);
+    });
+
+    it('is silent when a non-production instance runs Rekor', () => {
+      expect(collectBootWarnings(loadConfig({ TRANSPARENCY_LOG_DRIVER: 'rekor' }))).toEqual([]);
+    });
+
+    it('warns when production runs the in-process log via the override', () => {
+      const warnings = collectBootWarnings(
+        loadConfig({
+          NODE_ENV: 'production',
+          TRANSPARENCY_LOG_DRIVER: 'memory',
+          TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION: 'true',
+        }),
+      );
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0]).toMatch(/NOT publicly anchored/);
+    });
   });
 
   it('defaults the review lane to an empty reviewer set and the waiver off', () => {

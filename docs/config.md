@@ -75,6 +75,37 @@ stage does not mount and approvals record a verdict without publishing a release
 | `TRANSPARENCY_LOG_DRIVER` | `memory` | `rekor` for the real Sigstore/Rekor HTTP client (production, GW-D17); `memory` for the in-process RFC 6962 log (dev + tests). |
 | `TRANSPARENCY_LOG_REKOR_URL` | `https://rekor.sigstore.dev` | Base URL of the Rekor instance when the driver is `rekor`. |
 | `TRANSPARENCY_LOG_ORIGIN` | *(the `REGISTRY_ID`)* | The transparency log's checkpoint `origin` line (its identity in signed tree heads). Defaults to this registry's id so a self-hosted `memory` log names itself. |
+| `TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION` | `false` | Escape hatch to run the non-durable `memory` log with `NODE_ENV=production`. See the boot rule below. |
+
+> **Boot rule (#38):** `NODE_ENV=production` with `TRANSPARENCY_LOG_DRIVER=memory`
+> is **refused at boot** — the in-process log is not durable and anchors to nothing
+> public, so a production instance that forgot to set `rekor` would silently skip the
+> public anchoring FR-5 promises. Set `TRANSPARENCY_LOG_DRIVER=rekor`, or, if a
+> self-host operator deliberately accepts running a production-mode process with no
+> public log, set `TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION=true` to override.
+> Outside production the `memory` log stays the zero-config default and only logs a
+> boot warning.
+
+If `transparencyLog.append` fails at approval time, the countersign stage retries
+with bounded backoff; if every attempt fails it records an audited `release.log_failed`
+event and leaves the artifact **approved-but-unpublished** (no release document). An
+operator completes it once the log recovers via the re-drive endpoint
+`POST /v1/ops/artifacts/:id/redrive-release` (operator-gated; idempotent — an artifact
+that already has a release doc returns `409 already_released`).
+
+## Revocation & kill feed
+
+The registry owns distribution state and publishes it as a **signed revocation &
+kill feed** (SPEC §6, FR-8) — see [`api/revocation-feed.md`](api/revocation-feed.md).
+The feed is signed with the countersign key above (hosts verify it against the same
+trust root), so the anonymous feed endpoint mounts only when that key is configured.
+The revoke/kill ops endpoints are gated on a **config-listed operator set** (the
+same pattern as the reviewer roster — no operator console this phase, SCOPE cut).
+
+| Variable | Default | Description |
+|---|---|---|
+| `OPS_OPERATOR_IDENTITIES` | *(empty)* | Comma-separated list of the OIDC identities permitted to issue a revoke/kill, each in the canonical composite form `<url-encoded-issuer> <url-encoded-subject>` (what `composeOidcIdentity` produces), exactly as `REVIEW_REVIEWER_IDENTITIES`. **Empty means no identity can operate the kill switch (fail closed).** |
+| `REVOCATION_FEED_TTL_SECONDS` | `3600` | Freshness window (seconds) stamped on each served feed: how long a host may cache before it MUST re-check (fail-closed, scoped to this registry). Bounded to `1`–`86400` (the SPEC §6 24 h max TTL); the 1 h default keeps a kill within the §6 online propagation bound (≤ 1 h). |
 
 ## Storage
 

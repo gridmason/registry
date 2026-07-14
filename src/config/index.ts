@@ -108,6 +108,38 @@ export interface CountersignConfig {
   readonly certificatePem: string;
 }
 
+/**
+ * Signed revocation & kill feed settings (SPEC §6, FR-8). The registry owns
+ * distribution state and publishes it as a signed feed; these tune how it is
+ * served. The feed is signed with the countersign key ({@link CountersignConfig})
+ * so hosts verify it against the same trust root — no separate feed key.
+ */
+export interface RevocationConfig {
+  /**
+   * Freshness window (seconds) stamped on each served feed: how long a host may
+   * cache before it MUST re-check (fail-closed, scoped to this registry). Bounded
+   * at 24 h (SPEC §6 max TTL); the default is 1 h so a kill propagates within the
+   * §6 online bound (≤ 1 h) — a shorter TTL forces hosts to re-check sooner.
+   */
+  readonly feedTtlSeconds: number;
+}
+
+/**
+ * Registry operator settings (SPEC §6, §8 Ops API). The SCOPE-minimal cut ships
+ * no operator console; the operators permitted to issue a revoke/kill are a
+ * config-listed identity set (the same pattern as the reviewer roster,
+ * {@link ReviewConfig.reviewerIdentities}).
+ */
+export interface OpsConfig {
+  /**
+   * The OIDC identities permitted to issue a revoke/kill, in the canonical
+   * `composeOidcIdentity` composite form. Empty means no identity can operate the
+   * kill switch (fail closed) — an instance must configure at least one operator
+   * before the ops surface will act.
+   */
+  readonly operatorIdentities: readonly string[];
+}
+
 /** Which transparency log the countersign stage anchors releases in. */
 export type TransparencyLogDriver = 'memory' | 'rekor';
 
@@ -130,6 +162,17 @@ export interface TransparencyLogConfig {
    * Defaults to this registry's id so a self-hosted `memory` log names itself.
    */
   readonly origin: string;
+  /**
+   * Escape hatch for running the in-process `memory` log in production
+   * (`NODE_ENV=production`). The `memory` log is not durable and anchors to
+   * nothing public, so a production instance that forgets to set `rekor` would
+   * silently skip public anchoring — boot **refuses** that combination unless this
+   * is explicitly set (`TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION=true`). Kept
+   * as a deliberate override for a self-host operator running a production-mode
+   * process without external Rekor (they accept the no-public-log tradeoff); off
+   * by default so the safe path is the default.
+   */
+  readonly allowMemoryInProduction: boolean;
 }
 
 /** HTTP transport caps applied at the Fastify/Node server boundary. */
@@ -200,6 +243,10 @@ export interface Config {
   readonly review: ReviewConfig;
   /** Registry countersignature key custody (held separately from review staff). */
   readonly countersign: CountersignConfig;
+  /** Signed revocation & kill feed settings. */
+  readonly revocation: RevocationConfig;
+  /** Registry operator settings (the identities permitted to revoke/kill). */
+  readonly ops: OpsConfig;
   /** Transparency-log settings the countersign stage anchors releases in. */
   readonly transparencyLog: TransparencyLogConfig;
   /** HTTP transport caps. */
@@ -318,14 +365,74 @@ function validateIssuerAllowlist(issuers: readonly string[]): void {
 }
 
 /**
+ * Refuse to boot a production instance on the non-durable in-process
+ * transparency log unless explicitly overridden (#38, security follow-up). The
+ * `memory` driver anchors to nothing public, so a production instance that
+ * forgot to set `rekor` would silently skip the public anchoring FR-5 promises —
+ * a fail-fast at boot is far better than discovering it after the fact. Non-prod
+ * keeps `memory` as the zero-config default (a boot warning is surfaced
+ * separately via {@link collectBootWarnings}); the override lets a self-hoster who
+ * accepts the tradeoff run a production-mode process without external Rekor.
+ */
+function validateTransparencyLog(nodeEnv: NodeEnv, log: TransparencyLogConfig): void {
+  if (nodeEnv === 'production' && log.driver === 'memory' && !log.allowMemoryInProduction) {
+    throw new ConfigError(
+      'TRANSPARENCY_LOG_DRIVER=memory is refused in production (NODE_ENV=production): ' +
+        'the in-process log is not durable and anchors to nothing public, so releases ' +
+        'would skip public transparency anchoring. Set TRANSPARENCY_LOG_DRIVER=rekor, or ' +
+        'set TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION=true to override (self-host only, ' +
+        'accepting no public log).',
+    );
+  }
+}
+
+/**
+ * Non-fatal boot warnings for a loaded {@link Config}. Logged once at startup so a
+ * risky-but-permitted configuration is visible without failing the boot. Today the
+ * only warning is a non-production instance running the non-durable `memory`
+ * transparency log — the safe default for dev, but worth a line in the log.
+ */
+export function collectBootWarnings(config: Config): string[] {
+  const warnings: string[] = [];
+  if (config.nodeEnv !== 'production' && config.transparencyLog.driver === 'memory') {
+    warnings.push(
+      'TRANSPARENCY_LOG_DRIVER=memory: using the in-process transparency log — ' +
+        'not durable and not publicly anchored. Fine for dev/test; set ' +
+        'TRANSPARENCY_LOG_DRIVER=rekor for any instance that ships real releases.',
+    );
+  }
+  if (config.nodeEnv === 'production' && config.transparencyLog.driver === 'memory') {
+    // Reached only via the explicit override (boot would have refused otherwise).
+    warnings.push(
+      'TRANSPARENCY_LOG_DRIVER=memory in production via ' +
+        'TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION: releases are NOT publicly anchored.',
+    );
+  }
+  return warnings;
+}
+
+/**
  * Build the immutable {@link Config} from an environment map (defaults to
  * `process.env`). Throws {@link ConfigError} on the first invalid value.
  */
 export function loadConfig(env: Env = process.env): Config {
   const issuerAllowlist = readStringList(env, 'OIDC_ISSUER_ALLOWLIST', []);
   validateIssuerAllowlist(issuerAllowlist);
+  const nodeEnv = readEnum(env, 'NODE_ENV', 'development', NODE_ENVS);
+  const transparencyLog: TransparencyLogConfig = {
+    driver: readEnum(env, 'TRANSPARENCY_LOG_DRIVER', 'memory', ['memory', 'rekor'] as const),
+    rekorUrl: readString(env, 'TRANSPARENCY_LOG_REKOR_URL', 'https://rekor.sigstore.dev'),
+    // Defaults to the registry id so a self-hosted memory log names itself.
+    origin: readString(
+      env,
+      'TRANSPARENCY_LOG_ORIGIN',
+      readString(env, 'REGISTRY_ID', 'registry.local'),
+    ),
+    allowMemoryInProduction: readBool(env, 'TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION', false),
+  };
+  validateTransparencyLog(nodeEnv, transparencyLog);
   return {
-    nodeEnv: readEnum(env, 'NODE_ENV', 'development', NODE_ENVS),
+    nodeEnv,
     host: readString(env, 'HOST', '0.0.0.0'),
     port: readInt(env, 'PORT', 8080, { min: 1, max: 65535 }),
     logLevel: readEnum(env, 'LOG_LEVEL', 'info', LOG_LEVELS),
@@ -354,19 +461,18 @@ export function loadConfig(env: Env = process.env): Config {
       privateKeyPem: readPem(env, 'COUNTERSIGN_PRIVATE_KEY'),
       certificatePem: readPem(env, 'COUNTERSIGN_CERTIFICATE'),
     },
-    transparencyLog: {
-      driver: readEnum(env, 'TRANSPARENCY_LOG_DRIVER', 'memory', [
-        'memory',
-        'rekor',
-      ] as const),
-      rekorUrl: readString(env, 'TRANSPARENCY_LOG_REKOR_URL', 'https://rekor.sigstore.dev'),
-      // Defaults to the registry id so a self-hosted memory log names itself.
-      origin: readString(
-        env,
-        'TRANSPARENCY_LOG_ORIGIN',
-        readString(env, 'REGISTRY_ID', 'registry.local'),
-      ),
+    revocation: {
+      // Bounded at the SPEC §6 max TTL (24 h); defaults to 1 h so a kill lands
+      // within the online propagation bound.
+      feedTtlSeconds: readInt(env, 'REVOCATION_FEED_TTL_SECONDS', 3_600, {
+        min: 1,
+        max: 86_400,
+      }),
     },
+    ops: {
+      operatorIdentities: readStringList(env, 'OPS_OPERATOR_IDENTITIES', []),
+    },
+    transparencyLog,
     http: {
       bodyLimitBytes: readInt(env, 'HTTP_BODY_LIMIT_BYTES', 65_536, {
         min: 1_024,

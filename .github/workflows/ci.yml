@@ -35,7 +35,8 @@ jobs:
       - name: Build image
         run: docker build -t gridmason-registry:ci .
       - name: Boot container
-        run: docker run -d --name registry -p 8080:8080 gridmason-registry:ci
+        # #38 boot guard refuses TRANSPARENCY_LOG_DRIVER=memory under NODE_ENV=production; this is the documented self-host override for the smoke test.
+        run: docker run -d --name registry -p 8080:8080 -e TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION=true gridmason-registry:ci
       - name: Wait for /healthz to return 200
         run: |
           for i in $(seq 1 30); do
