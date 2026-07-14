@@ -1,0 +1,98 @@
+# Local development stack: Postgres (records/review/audit) + MinIO (artifacts,
+# release docs, feeds), the schema migration one-shot, and the registry service.
+#
+#   docker compose up --build
+#
+# Bring up only the backing stores (e.g. to run the service from the host with
+# `npm run dev`, whose config defaults already target these published ports):
+#
+#   docker compose up postgres minio createbuckets
+#
+# Env vars and their defaults are documented in docs/config.md.
+name: gridmason-registry
+
+# Shared connection settings for the service + migrate one-shot. Hostnames are
+# the in-network service names (not localhost), overriding the host-oriented
+# defaults baked into the config loader.
+x-registry-env: &registry-env
+  DATABASE_URL: postgres://gridmason:gridmason@postgres:5432/gridmason
+  OBJECT_STORE_ENDPOINT: http://minio:9000
+  OBJECT_STORE_REGION: us-east-1
+  OBJECT_STORE_BUCKET: gridmason-registry
+  OBJECT_STORE_ACCESS_KEY_ID: gridmason
+  OBJECT_STORE_SECRET_ACCESS_KEY: gridmason-dev-secret
+  OBJECT_STORE_FORCE_PATH_STYLE: "true"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: gridmason
+      POSTGRES_PASSWORD: gridmason
+      POSTGRES_DB: gridmason
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gridmason -d gridmason"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: gridmason
+      MINIO_ROOT_PASSWORD: gridmason-dev-secret
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # web console
+    volumes:
+      - minio-data:/data
+
+  # One-shot: wait for MinIO, then create the registry bucket idempotently.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        until mc alias set local http://minio:9000 gridmason gridmason-dev-secret; do
+          echo 'waiting for minio...'; sleep 1;
+        done
+        mc mb --ignore-existing local/gridmason-registry
+        echo 'bucket ready'
+    restart: "no"
+
+  # One-shot: apply database migrations before the service starts.
+  migrate:
+    build: .
+    command: ["node", "dist/db/migrate-cli.js"]
+    environment:
+      <<: *registry-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  registry:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      <<: *registry-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  postgres-data:
+  minio-data:

@@ -13,6 +13,19 @@ describe('loadConfig', () => {
       serviceName: 'gridmason-registry',
       requestIdHeader: 'x-request-id',
       shutdownTimeoutMs: 10_000,
+      postgres: {
+        url: 'postgres://gridmason:gridmason@localhost:5432/gridmason',
+        poolMax: 10,
+        connectionTimeoutMs: 5_000,
+      },
+      objectStore: {
+        endpoint: 'http://localhost:9000',
+        region: 'us-east-1',
+        bucket: 'gridmason-registry',
+        accessKeyId: 'gridmason',
+        secretAccessKey: 'gridmason-dev-secret',
+        forcePathStyle: true,
+      },
     });
   });
 
@@ -33,6 +46,43 @@ describe('loadConfig', () => {
     expect(config.serviceName).toBe('registry-test');
     expect(config.requestIdHeader).toBe('x-correlation-id');
     expect(config.shutdownTimeoutMs).toBe(5000);
+  });
+
+  it('reads storage settings from the environment', () => {
+    const config = loadConfig({
+      DATABASE_URL: 'postgres://u:p@db:5432/reg',
+      DATABASE_POOL_MAX: '25',
+      DATABASE_CONNECTION_TIMEOUT_MS: '2000',
+      OBJECT_STORE_ENDPOINT: 'https://s3.example.com',
+      OBJECT_STORE_REGION: 'eu-west-1',
+      OBJECT_STORE_BUCKET: 'prod-bucket',
+      OBJECT_STORE_ACCESS_KEY_ID: 'AKIA',
+      OBJECT_STORE_SECRET_ACCESS_KEY: 'secret',
+      OBJECT_STORE_FORCE_PATH_STYLE: 'false',
+    });
+    expect(config.postgres).toEqual({
+      url: 'postgres://u:p@db:5432/reg',
+      poolMax: 25,
+      connectionTimeoutMs: 2_000,
+    });
+    expect(config.objectStore).toEqual({
+      endpoint: 'https://s3.example.com',
+      region: 'eu-west-1',
+      bucket: 'prod-bucket',
+      accessKeyId: 'AKIA',
+      secretAccessKey: 'secret',
+      forcePathStyle: false,
+    });
+  });
+
+  it('accepts 1/0 as booleans and rejects other strings', () => {
+    expect(loadConfig({ OBJECT_STORE_FORCE_PATH_STYLE: '1' }).objectStore.forcePathStyle).toBe(
+      true,
+    );
+    expect(loadConfig({ OBJECT_STORE_FORCE_PATH_STYLE: '0' }).objectStore.forcePathStyle).toBe(
+      false,
+    );
+    expect(() => loadConfig({ OBJECT_STORE_FORCE_PATH_STYLE: 'yes' })).toThrow(ConfigError);
   });
 
   it('rejects a non-integer port', () => {

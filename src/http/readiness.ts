@@ -9,6 +9,8 @@
  * reports the service cannot serve until storage lands.
  */
 
+import { formatError } from '../errors.js';
+
 export type ReadinessStatus = 'ready' | 'not-ready';
 
 export interface ReadinessCheckResult {
@@ -55,7 +57,7 @@ export class ReadinessRegistry {
               name,
               {
                 status: 'not-ready',
-                detail: err instanceof Error ? err.message : String(err),
+                detail: formatError(err),
               },
             ];
           }
@@ -75,14 +77,16 @@ export class ReadinessRegistry {
 }
 
 /**
- * A registry seeded with the dependencies the service will need. Storage is
- * registered as not-ready until #3 wires the real Postgres/object-store probes.
+ * A registry seeded with the dependencies the service will need. The `storage`
+ * probe defaults to not-ready; wiring a storage bundle into `buildServer`
+ * replaces it with live `postgres` and `objectStore` probes
+ * (see `registerStorageProbes`).
  */
 export function createDefaultReadinessRegistry(): ReadinessRegistry {
   const registry = new ReadinessRegistry();
   registry.register('storage', () => ({
     status: 'not-ready',
-    detail: 'storage layer not configured (pending #3)',
+    detail: 'storage layer not configured',
   }));
   return registry;
 }

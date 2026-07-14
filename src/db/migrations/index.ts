@@ -1,0 +1,10 @@
+/**
+ * The ordered migration set. Append new migrations here; never reorder or edit
+ * an already-shipped entry — add a follow-on migration instead.
+ */
+import { migration0001 } from './0001_initial_schema.js';
+import type { Migration } from './types.js';
+
+export type { Migration };
+
+export const migrations: readonly Migration[] = [migration0001];
