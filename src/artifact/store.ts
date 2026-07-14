@@ -46,6 +46,12 @@ export interface ArtifactStore {
     version: string,
   ): Promise<ArtifactRecord | null>;
   /**
+   * Every artifact currently in `state`, oldest first — the human review lane's
+   * queue reads `reviewing` this way (SPEC §4). Oldest-first so the queue is a
+   * FIFO of what has waited longest.
+   */
+  listByState(state: ArtifactState): Promise<ArtifactRecord[]>;
+  /**
    * Advance an artifact's lifecycle state from `from` to `to`, returning the
    * updated record — or `null` when the artifact is not currently in `from` (a
    * concurrent transition already moved it). Only `state` changes; identity and
@@ -158,6 +164,16 @@ export function createPostgresArtifactStore(
       return rows[0] ? rowToRecord(rows[0] as ArtifactRow) : null;
     },
 
+    async listByState(state) {
+      const { rows } = await postgres.query(
+        `SELECT ${SELECT_COLUMNS}
+           FROM artifact WHERE state = $1
+          ORDER BY created_at ASC`,
+        [state],
+      );
+      return rows.map((row) => rowToRecord(row as ArtifactRow));
+    },
+
     async transition(id, from, to) {
       // The `state = from` guard makes the move a no-op (null result) when the
       // artifact has already left `from`, so concurrent reviews cannot double-move.
@@ -218,6 +234,12 @@ export class InMemoryArtifactStore implements ArtifactStore {
           r.publisherId === publisherId && r.tag === tag && r.version === version,
       ) ?? null,
     );
+  }
+
+  listByState(state: ArtifactState): Promise<ArtifactRecord[]> {
+    // `records` is append-ordered by insertion, so filtering preserves the
+    // oldest-first ordering the Postgres store gets from `ORDER BY created_at`.
+    return Promise.resolve(this.records.filter((r) => r.state === state));
   }
 
   transition(
