@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a defect in the Gridmason Registry service or its self-host packaging.
+labels: ["type:bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Thanks for filing a bug. **Do not report security vulnerabilities here** —
+        a registry is supply chain, so use a
+        [private advisory](https://github.com/gridmason/registry/security/advisories/new)
+        instead (see SECURITY.md).
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight
+      options:
+        - label: This is not a security vulnerability (those go to private advisories).
+          required: true
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you observe, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal sequence — commands, requests, or config — that triggers it.
+      placeholder: |
+        1. `docker run ... gridmason-registry`
+        2. `curl -i ...`
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: The published version or commit SHA you are running.
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it?
+      options:
+        - Self-hosted (container)
+        - Self-hosted (from source)
+        - Against the flagship (registry.gridmason.dev)
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Structured log lines or error output. Redact secrets and tokens.
+      render: text

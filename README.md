@@ -113,6 +113,25 @@ to prove that shared-toolchain wiring.
 
 Both are pinned in `package.json`.
 
+## Operator policy page
+
+Every registry instance publishes a **policy page** stating how it reviews,
+signs, and serves remotes — the mechanism is platform, the policy is the
+operator's, and it is published (no secret rules, SPEC §4). The in-repo template
+renders two variants from one source: the flagship invite-only launch instance
+and the neutral self-host default. See [`docs/policy/`](docs/policy/) and run
+`npm run policy:render`.
+
+## Contributing & community
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — dev setup, the design principles this
+  repo holds to, and the PR checklist.
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) — Contributor Covenant 2.1.
+- [`SECURITY.md`](SECURITY.md) — report vulnerabilities privately, never as a
+  public issue.
+- [Contributor License Agreement](.github/CLA.md) — required; the CLA gate blocks
+  merge until it is signed.
+
 ## License
 
 [AGPL-3.0](LICENSE). External contributions require the Gridmason CLA.

@@ -26,7 +26,9 @@
     "test:watch": "vitest",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "migrate": "tsx src/db/migrate-cli.ts"
+    "migrate": "tsx src/db/migrate-cli.ts",
+    "policy:render": "tsx scripts/render-policy.ts",
+    "policy:check": "tsx scripts/render-policy.ts --check"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
