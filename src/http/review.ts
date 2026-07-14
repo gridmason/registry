@@ -66,6 +66,24 @@ function sendVerdictRejection(reply: FastifyReply, rejection: VerdictRejection):
         'not_in_review',
         'the artifact is not awaiting review (already decided or auto-rejected)',
       );
+    case 'author-unresolved':
+      // The artifact references a publisher record we cannot load, so reviewer≠author
+      // cannot be proven — fail closed rather than let the verdict through.
+      return sendError(
+        reply,
+        409,
+        'author_unresolved',
+        "the artifact's publisher record could not be resolved; refusing the verdict",
+      );
+    case 'transition-failed':
+      // The artifact left `reviewing` concurrently (a revoke/kill) after the verdict
+      // was recorded but before the state moved.
+      return sendError(
+        reply,
+        409,
+        'transition_failed',
+        'the artifact was no longer awaiting review when the verdict was applied',
+      );
     case 'self-review':
       return sendError(
         reply,

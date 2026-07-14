@@ -48,9 +48,11 @@ export interface SubmitVerdictInput {
 export type VerdictRejection =
   | { readonly kind: 'case-not-found' }
   | { readonly kind: 'not-in-review' }
+  | { readonly kind: 'author-unresolved' }
   | { readonly kind: 'self-review' }
   | { readonly kind: 'findings'; readonly code: FindingsRejection; readonly message: string }
-  | { readonly kind: 'already-decided' };
+  | { readonly kind: 'already-decided' }
+  | { readonly kind: 'transition-failed' };
 
 export interface VerdictOutcome {
   readonly reviewCase: ReviewCaseRecord;
@@ -136,11 +138,16 @@ export function createHumanReviewLane(deps: HumanReviewLaneDeps): HumanReviewLan
       }
 
       // reviewer ≠ author: compare the reviewer's identity to the artifact
-      // publisher's. The publisher record is the authorship anchor (SPEC §2).
+      // publisher's. The publisher record is the authorship anchor (SPEC §2). If
+      // the author cannot be resolved we cannot prove reviewer≠author, so fail
+      // closed — never let an unverifiable identity through (a dangling publisher
+      // is an integrity fault the FK should forbid, but the check must not depend
+      // on that to stay safe).
       const reviewerId = composeOidcIdentity(input.reviewer.issuer, input.reviewer.subject);
       const author = await publisherStore.findById(artifact.publisherId);
-      const authorId = author ? composeOidcIdentity(author.issuer, author.subject) : null;
-      const isSelfReview = authorId !== null && authorId === reviewerId;
+      if (!author) return { ok: false, rejection: { kind: 'author-unresolved' } };
+      const authorId = composeOidcIdentity(author.issuer, author.subject);
+      const isSelfReview = authorId === reviewerId;
       if (isSelfReview && !selfReviewWaiver) {
         return { ok: false, rejection: { kind: 'self-review' } };
       }
@@ -161,6 +168,11 @@ export function createHumanReviewLane(deps: HumanReviewLaneDeps): HumanReviewLan
 
       const target = verdict; // 'approved' | 'rejected' are the target states too.
       const moved = await artifactStore.transition(artifact.id, 'reviewing', target);
+      // A `null` transition means the artifact left `reviewing` between the read
+      // above and here (a concurrent revoke/kill): the verdict is recorded but the
+      // move did not happen. Surface that as a fault rather than reporting success
+      // with a fabricated state — never claim the artifact moved when it did not.
+      if (!moved) return { ok: false, rejection: { kind: 'transition-failed' } };
 
       // A waiver use gets its own audit event (SPEC §4a) so the transparency step
       // can flag the release, then the verdict transition itself is audited.
@@ -169,10 +181,7 @@ export function createHumanReviewLane(deps: HumanReviewLaneDeps): HumanReviewLan
       }
       emitAuditEvent(reviewerId, `review.${target}`, artifact.id);
 
-      return {
-        ok: true,
-        outcome: { reviewCase: decided, artifact: moved ?? { ...artifact, state: target }, waiverUsed },
-      };
+      return { ok: true, outcome: { reviewCase: decided, artifact: moved, waiverUsed } };
     },
   };
 }

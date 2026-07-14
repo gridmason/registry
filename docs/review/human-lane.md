@@ -88,6 +88,13 @@ case still being undecided), so two reviewers racing the same case cannot both
 decide it — the second attempt gets `409 already_decided` (or `409 not_in_review`
 once the artifact has left `reviewing`).
 
+The lane **fails closed** on two integrity faults rather than letting a verdict
+through: if the artifact's publisher record cannot be resolved (so reviewer≠author
+is unprovable) the verdict is refused with `409 author_unresolved`; if the
+artifact leaves `reviewing` concurrently (a revoke/kill) after the verdict is
+recorded but before the state moves, the verdict returns `409 transition_failed`
+rather than reporting success with a state the artifact never reached.
+
 Every verdict emits a `review.approved` / `review.rejected` **audit event**
 (actor = the reviewer's identity, subject = the artifact id), SPEC §10 / FR-12.
 
