@@ -27,7 +27,7 @@ export const CHECKS_MODULE = '@gridmason/cli/checks';
  * dependency range in `package.json` — a mismatch means the doc/report claims a
  * version the service does not actually run.
  */
-export const CHECKS_VERSION = '0.0.3';
+export const CHECKS_VERSION = '0.6.0';
 
 /**
  * Extensions the static-analysis checks (SDK-adherence, DOM-abuse) treat as

@@ -14,7 +14,7 @@ const input: CreateArtifactInput = {
   version: '1.2.0',
   contentHashes: { 'manifest.json': 'sha2-256:aaaa', 'entry.js': 'sha2-256:bbbb' },
   sourceArchiveRef: 'sha2-256:cccc',
-  envelope: { payloadType: 'x', payload: 'y', signatures: [{ sig: 'z' }] },
+  envelope: { formatVersion: '1.0', subject: { artifact: 'acme-clock@1.2.0', releaseHash: 'sha2-256:aa' }, publisherSig: { alg: 'ES256', cert: 'c', issuer: 'i', subjectClaims: {}, sig: 's' } },
 };
 
 describe('InMemoryArtifactStore', () => {

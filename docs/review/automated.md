@@ -10,7 +10,7 @@ artifact before the human review lane. It satisfies **FR-3** and SPEC §4, §7,
 The stage runs the **shared checks module** verbatim:
 
 - **Module:** `@gridmason/cli/checks` (the `./checks` export of `@gridmason/cli`).
-- **Version pin:** `@gridmason/cli` `^0.0.3` (see `package.json`); the resolved
+- **Version pin:** `@gridmason/cli` `^0.6.0` (see `package.json`); the resolved
   version is recorded on every report as `checksReport.checksVersion` and mirrored
   by the `CHECKS_VERSION` constant in [`src/review/report.ts`](../../src/review/report.ts).
 

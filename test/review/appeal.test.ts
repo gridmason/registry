@@ -27,7 +27,7 @@ import { createHumanReviewLane } from '../../src/review/human/lane.js';
 const ISSUER = 'https://issuer.example';
 const report: AutomatedReviewReport = {
   checksModule: '@gridmason/cli/checks',
-  checksVersion: '0.0.3',
+  checksVersion: '0.6.0',
   status: 'fail',
   results: [
     { id: 'sdk.raw-network', status: 'fail', message: 'raw fetch() outside the SDK' },

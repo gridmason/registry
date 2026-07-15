@@ -83,7 +83,7 @@ function isFileRole(value: unknown): value is ArtifactFileRole {
 /**
  * Parse and structurally validate a publish-upload body. Requires a `tag` and
  * `version`, a `files[]` with exactly one `manifest` and exactly one `entry` and
- * unique non-empty paths, a `sourceArchive`, and a DSSE-shaped `envelope`.
+ * unique non-empty paths, a `sourceArchive`, and a protocol-`SignatureEnvelope` `envelope`.
  */
 export function parseArtifactUpload(
   body: unknown,

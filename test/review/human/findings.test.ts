@@ -9,7 +9,7 @@ import { validateFindings, reportCheckIds } from '../../../src/review/human/find
 
 const report: AutomatedReviewReport = {
   checksModule: '@gridmason/cli/checks',
-  checksVersion: '0.0.3',
+  checksVersion: '0.6.0',
   status: 'pass',
   results: [
     { id: 'manifest.schema', status: 'pass', message: 'ok' },
@@ -71,7 +71,7 @@ describe('validateFindings', () => {
   it('validates only against `manual` when the report carried a load failure', () => {
     const failed: AutomatedReviewReport = {
       checksModule: '@gridmason/cli/checks',
-      checksVersion: '0.0.3',
+      checksVersion: '0.6.0',
       status: 'fail',
       results: [],
       error: { code: 'no-manifest', message: 'artifact has no manifest part' },
