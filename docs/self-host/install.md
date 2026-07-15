@@ -13,7 +13,7 @@ launch-phase waivers (SPEC §9, §4a). Everything below is self-host-neutral.
 Scope of this cut (SPEC §9, GW-D19): a single container image + `compose` (Helm is a
 stretch, not shipped). Object store + database are the only backing services.
 Trust-root **rotation** is manual this phase and lives in its own runbook
-(`docs/self-host/rotation.md`); this page covers **generation at install** and points
+([`rotation.md`](rotation.md)); this page covers **generation at install** and points
 there. There is no publisher console, no offline-bundle serving, and no self-hosted
 transparency log (Phase C) — see the SCOPE cut in `docs/SPEC.md`.
 
@@ -121,7 +121,7 @@ fingerprint to your host operators to pin. Optional fields:
   issued-cert authorship path; omit it for the keyless OIDC path this cut uses.
 
 Rotating a root later (publishing an overlap document cross-signed by the outgoing
-root) is manual — see the rotation runbook `docs/self-host/rotation.md`.
+root) is manual — see the [rotation runbook](rotation.md).
 
 ## 3. Publish your policy page
 

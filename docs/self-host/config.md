@@ -89,9 +89,19 @@ them at managed services.
 
 ## Trust-root generation (install tooling)
 
-These are read by `npm run trust-root:init` (not the running service) when it generates
-`trust-root.json` — see [`install.md`](install.md#2-generate-the-trust-roots). It also
-reads `REGISTRY_ID`, `OIDC_ISSUER_ALLOWLIST`, and the countersign key above.
+These are read by the install tooling, **not** the running service: `npm run
+trust-root:init` when it generates `trust-root.json` (see
+[`install.md`](install.md#2-generate-the-trust-roots)) **and** `npm run rotate:root`
+when it generates an overlap document during a rotation (see the
+[rotation runbook](rotation.md)). Both also read `REGISTRY_ID`,
+`OIDC_ISSUER_ALLOWLIST`, and the countersign key above.
+
+> **When rotating, carry these forward.** A rotation moves only the countersign root;
+> the other trust anchors are re-read from the environment, not copied from the old
+> document. `rotate:root` reads `TRUST_ROOT_PUBLISHER_CA_ROOTS` and
+> `TRUST_ROOT_LOG_PUBLIC_KEYS` the same way `trust-root:init` does, so set them to the
+> same values you installed with — omitting them drops your custom CA roots / log keys
+> from the overlap document.
 
 | Variable | Default | Self-host note |
 |---|---|---|

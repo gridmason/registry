@@ -67,28 +67,13 @@ jobs:
           cache: npm
       - run: npm ci
 
-      # Step 2 of docs/self-host/install.md: generate the trust roots. Prove
-      # `trust-root:init` produces a valid @gridmason/protocol TrustRootDoc from a
-      # fresh countersign key.
-      - name: Generate a countersign key + trust root
-        run: |
-          openssl ecparam -name prime256v1 -genkey -noout -out countersign.key
-          openssl req -x509 -new -key countersign.key -days 365 \
-            -subj "/CN=smoke.local countersign" -out countersign.crt
-          REGISTRY_ID=smoke.local \
-          OIDC_ISSUER_ALLOWLIST=https://token.actions.githubusercontent.com \
-          COUNTERSIGN_PRIVATE_KEY="$(cat countersign.key)" \
-          COUNTERSIGN_CERTIFICATE="$(cat countersign.crt)" \
-          npm run trust-root:init
-          test -f trust-root.json
-          node -e "const d=require('./trust-root.json'); if(!d.countersignRoots?.[0]?.startsWith('sha256:')) { console.error('bad trust root', d); process.exit(1); } console.log('trust root ok:', d.countersignRoots[0])"
+      # Steps mirror the docs/self-host/install.md quickstart in its documented
+      # order (§1 bring up the stack → §2 trust roots → §3 policy page → §4 publish).
+      # §2 and §3 are self-contained local generation steps that do not depend on the
+      # running stack, so their placement is honest, not load-bearing.
 
-      # Step 3: the self-host policy page renders.
-      - name: Render the self-host policy page
-        run: npm run policy:render -- --variant self-host --stdout > /dev/null
-
-      # Step 1: bring up the whole compose stack (image + Postgres + object store),
-      # which runs migrations and starts the service.
+      # Step 1 (§1): bring up the whole compose stack (image + Postgres + object
+      # store), which runs migrations and starts the service.
       - name: docker compose up
         run: docker compose up --build -d
 
@@ -108,7 +93,26 @@ jobs:
           docker compose logs
           exit 1
 
-      # Step 4: the publish target responds. Unauthenticated → 401 proves the
+      # Step 2 (§2): generate the trust roots. Prove `trust-root:init` produces a
+      # valid @gridmason/protocol TrustRootDoc from a fresh countersign key.
+      - name: Generate a countersign key + trust root
+        run: |
+          openssl ecparam -name prime256v1 -genkey -noout -out countersign.key
+          openssl req -x509 -new -key countersign.key -days 365 \
+            -subj "/CN=smoke.local countersign" -out countersign.crt
+          REGISTRY_ID=smoke.local \
+          OIDC_ISSUER_ALLOWLIST=https://token.actions.githubusercontent.com \
+          COUNTERSIGN_PRIVATE_KEY="$(cat countersign.key)" \
+          COUNTERSIGN_CERTIFICATE="$(cat countersign.crt)" \
+          npm run trust-root:init
+          test -f trust-root.json
+          node -e "const d=require('./trust-root.json'); if(!d.countersignRoots?.[0]?.startsWith('sha256:')) { console.error('bad trust root', d); process.exit(1); } console.log('trust root ok:', d.countersignRoots[0])"
+
+      # Step 3 (§3): the self-host policy page renders.
+      - name: Render the self-host policy page
+        run: npm run policy:render -- --variant self-host --stdout > /dev/null
+
+      # Step 4 (§4): the publish target responds. Unauthenticated → 401 proves the
       # endpoint is mounted and reachable (a 404 would mean it is not).
       - name: Assert the publish target responds
         run: |
