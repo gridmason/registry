@@ -36,6 +36,22 @@ phone (SPEC §1, §8): the Deployment API (canary/rollback/targeted kill) is opt
 and a Phase-C cut, and resolution works without it. The gate snapshot is the
 *host's* enablement state; the registry only qualifies it with verifiable URLs.
 
+### CORS — callable from a browser host
+
+Because it is anonymous, `POST /v1/resolve` sends **wildcard CORS**
+(`Access-Control-Allow-Origin: *`) and answers the JSON `POST`'s preflight
+`OPTIONS` (`204` with `Access-Control-Allow-Methods: POST, OPTIONS`,
+`Access-Control-Allow-Headers: content-type`, a 10-minute `Access-Control-Max-Age`),
+so a browser-based host — the Gridmason Dashboard on `localhost:5173` pointed at a
+registry on `localhost:8080`, or any embedding app — can resolve cross-origin. A
+wildcard is the right posture: the endpoint takes **no credentials** (so no
+`Access-Control-Allow-Credentials`), and its output is a **signed** fragment a host
+verifies with `@gridmason/protocol` before trusting — the requesting origin is not a
+trust boundary. `Access-Control-Expose-Headers` lists `etag` and the correlation-id
+header. The **authenticated** control plane (publisher, review, ops) sends no CORS
+and is not browser-callable cross-origin. See [`../serving.md`](../serving.md#cors)
+for the full posture.
+
 ## Source-qualified identity (SPEC §9, FR-10)
 
 Publisher prefixes are unique **only within a registry** — there is no global prefix
