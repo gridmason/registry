@@ -6,6 +6,10 @@ and its publisher signature envelope, and the registry records a **submitted**
 artifact for the review lane. It does **not** run checks or countersign — that is
 the automated-review stage (#8) and countersign (#10).
 
+After uploading, a publisher polls the review outcome and appeals a rejection
+through the [artifact status + appeal API](./artifact-status.md)
+(`GET /v1/artifacts/:id`, `POST /v1/artifacts/:id/appeal`).
+
 ## Identity + authorization
 
 The upload presents a bearer token, verified exactly as publisher registration is

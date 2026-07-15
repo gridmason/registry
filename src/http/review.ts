@@ -91,6 +91,15 @@ function sendVerdictRejection(reply: FastifyReply, rejection: VerdictRejection):
         'self_review_forbidden',
         'a publisher cannot review their own artifact (reviewer ≠ author)',
       );
+    case 'appeal-original-reviewer':
+      // SPEC §4: an appeal routes to a second reviewer, never the original — the
+      // reviewer who cast the rejection cannot decide the re-review.
+      return sendError(
+        reply,
+        403,
+        'appeal_reviewer_forbidden',
+        'the original reviewer cannot decide an appeal (appeal reviewer ≠ original reviewer)',
+      );
     case 'findings':
       // A well-formed but semantically invalid finding (a check id absent from the
       // report) is a 422; a structurally malformed payload is a 400.
