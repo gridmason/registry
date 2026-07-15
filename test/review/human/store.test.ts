@@ -10,7 +10,7 @@ import { InMemoryReviewCaseStore } from '../../../src/review/store.js';
 
 const report: AutomatedReviewReport = {
   checksModule: '@gridmason/cli/checks',
-  checksVersion: '0.0.3',
+  checksVersion: '0.6.0',
   status: 'pass',
   results: [{ id: 'manifest.schema', status: 'pass', message: 'ok' }],
 };

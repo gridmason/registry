@@ -46,9 +46,15 @@ const b64 = (value: string): string => Buffer.from(value).toString('base64');
 const b64json = (value: unknown): string => b64(JSON.stringify(value));
 
 const validEnvelope = {
-  payloadType: 'application/vnd.gridmason.artifact+json',
-  payload: b64('{"tag":"acme-clock"}'),
-  signatures: [{ sig: 'MEUCIQ', keyid: 'oidc' }],
+  formatVersion: '1.0',
+  subject: { artifact: 'acme-clock@1.2.0', releaseHash: `sha2-256:${'ab'.repeat(32)}` },
+  publisherSig: {
+    alg: 'ES256',
+    cert: 'MIIBQ2R1bW15Y2VydA==',
+    issuer: 'https://issuer.example',
+    subjectClaims: { email: 'dev@acme.example' },
+    sig: 'ZHVtbXktc2ln',
+  },
 };
 
 function uploadBody(version: string): Record<string, unknown> {
@@ -75,7 +81,7 @@ function uploadBody(version: string): Record<string, unknown> {
 
 const PASS_REPORT: AutomatedReviewReport = {
   checksModule: '@gridmason/cli/checks',
-  checksVersion: '0.0.3',
+  checksVersion: '0.6.0',
   status: 'pass',
   results: [{ id: 'manifest.schema', status: 'pass', message: 'ok' }],
 };
@@ -205,13 +211,13 @@ describe('audit-event completeness (FR-12)', () => {
     });
 
   /**
-   * Seed an artifact carrying a **valid publisher envelope** (the
-   * `{ formatVersion, subject, publisherSig }` shape the countersign stage parses)
-   * so the approval-time countersign hook actually publishes a release. HTTP intake
-   * stores the DSSE-shaped envelope, whose cryptographic verification against the
-   * protocol envelope types is deferred to a later protocol milestone (see
-   * `src/artifact/envelope.ts`), so countersign can only be exercised end to end
-   * from a pre-seeded valid envelope — mirroring `lane-integration.test.ts`.
+   * Seed an artifact carrying a publisher envelope whose `releaseHash` actually
+   * binds its content hashes (via `makePublisherFixture`), so the approval-time
+   * countersign hook publishes a release. HTTP intake now accepts the protocol
+   * envelope shape (registry#55), but this test's `uploadBody` envelope uses a
+   * placeholder `releaseHash` that does not bind the uploaded bytes, so *its*
+   * countersign fails the release-hash binding — a correctly-bound envelope is
+   * seeded here to exercise countersign end to end, mirroring `lane-integration.test.ts`.
    */
   async function seedCountersignable(
     artifactStore: Awaited<ReturnType<typeof makeApp>>['artifactStore'],
@@ -246,8 +252,9 @@ describe('audit-event completeness (FR-12)', () => {
     const approved = await publish(app, '1.0.0');
     expect(approved.json().state).toBe('reviewing');
     const approvedId = approved.json().id as string;
-    // FR-4 approve (this one carries the DSSE intake envelope, so its countersign
-    // hook fails silently — the release events come from the seeded artifact below).
+    // FR-4 approve (this one's envelope has a placeholder releaseHash that does not
+    // bind its content, so its countersign hook fails silently — the release events
+    // come from the seeded, correctly-bound artifact below).
     const approveVerdict = await verdict(app, await caseIdFor(app, approvedId), 'approve');
     expect(approveVerdict.json().artifactState).toBe('approved');
 

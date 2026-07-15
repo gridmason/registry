@@ -1,59 +1,41 @@
 /**
- * Publisher signature envelope — **structural** validation (SPEC §2).
+ * Publisher signature envelope — **structural** validation at intake (SPEC §2).
  *
  * Every published version carries a publisher signature envelope (keyless by
  * default, Sigstore-style, OIDC-bound — SPEC §2). Publish intake (#7) records it
  * with the submitted artifact so the review and countersign stages have it to
- * verify, but intake itself does **not** verify the signature: cryptographic
- * verification against the `@gridmason/protocol` envelope types is deferred to
- * countersign (#10), gated on protocol P-E3 publishing those types. This is a
- * recorded scope decision on the issue.
+ * verify; intake itself does **not** verify the signature cryptographically — that
+ * is the countersign stage (#10), which applies the registry approval half and
+ * whose host-side `@gridmason/protocol` verify a host runs before loading.
  *
- * What intake does enforce is a structural shape-check, so a missing or
- * obviously-malformed envelope is refused at the door rather than persisted as
- * junk. The shape checked is the standard DSSE / in-toto attestation envelope
- * (`payloadType` + `payload` + non-empty `signatures[]`), which is the Sigstore
- * envelope this platform targets. The check is intentionally shallow — it proves
- * the shape, never the cryptography — and the envelope is otherwise stored as
- * opaque JSON.
+ * What intake enforces is that the envelope is the **`@gridmason/protocol`
+ * `SignatureEnvelope` publisher half** — `{ formatVersion, subject{ artifact,
+ * releaseHash }, publisherSig{ alg, cert, issuer, subjectClaims, sig } }` — the
+ * shape `@gridmason/cli` (≥ 0.6.0) uploads and the countersign stage consumes. It
+ * does this by **reusing the countersign stage's own parser**
+ * ({@link parsePublisherEnvelope}), so the guarantee is exact: an envelope intake
+ * accepts is one countersign can parse — there is no second, drifting definition.
+ * The check is still structural (it proves the shape and field types, never the
+ * cryptography); the envelope is otherwise stored as opaque JSON.
+ *
+ * **Breaking change (registry#55, owner decision on gridmason/cli#70).** Intake
+ * previously accepted the bare **DSSE** shape (`payloadType` + `payload` +
+ * `signatures[]`) that `@gridmason/cli` ≤ 0.5.x uploaded. The owner decided the
+ * CLI emits the protocol `SignatureEnvelope`, so DSSE is no longer accepted: an
+ * upload from `@gridmason/cli` ≤ 0.5.x is now refused `400 invalid_envelope`.
+ * Publishers upgrade to `@gridmason/cli` ≥ 0.6.0. See `docs/api/publish.md`.
  */
+import { parsePublisherEnvelope } from '../countersign/countersign.js';
 
 /**
- * A structurally well-formed signature envelope. This is a **shape** guarantee,
- * not a validity proof: the signatures are not verified here. Kept minimal on
- * purpose so it does not diverge from the authoritative protocol type when that
- * lands — the follow-up (P-E3) replaces this with the imported type.
- */
-export interface SignatureEnvelope {
-  /** Media type of the signed payload (DSSE `payloadType`). */
-  readonly payloadType: string;
-  /** The signed payload, base64 in the DSSE encoding. Opaque to intake. */
-  readonly payload: string;
-  /** One or more signatures over the payload. Never verified at intake. */
-  readonly signatures: readonly { readonly sig: string; readonly keyid?: string }[];
-}
-
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === 'string' && value !== '';
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * True when `value` is a structurally well-formed {@link SignatureEnvelope}:
- * a DSSE-shaped object with a non-empty `payloadType`, a non-empty `payload`,
- * and at least one signature entry whose `sig` is a non-empty string. Returns a
+ * True when `value` is a structurally well-formed `@gridmason/protocol`
+ * `SignatureEnvelope` publisher half — decided by the countersign stage's parser,
+ * so intake and countersign never diverge on "what is a valid envelope". Returns a
  * boolean rather than throwing so the route maps a `false` to a clean
- * `400 invalid_envelope`. It does **not** verify any signature.
+ * `400 invalid_envelope`. It does **not** verify any signature. A publisher-half
+ * envelope carries no `registrySig` (the registry adds that at countersign); one
+ * that already does is rejected here, as it is by the parser.
  */
-export function isStructurallyValidEnvelope(value: unknown): value is SignatureEnvelope {
-  if (!isPlainObject(value)) return false;
-  if (!isNonEmptyString(value.payloadType)) return false;
-  if (!isNonEmptyString(value.payload)) return false;
-  if (!Array.isArray(value.signatures) || value.signatures.length === 0) return false;
-  return value.signatures.every(
-    (entry) => isPlainObject(entry) && isNonEmptyString(entry.sig),
-  );
+export function isStructurallyValidEnvelope(value: unknown): boolean {
+  return parsePublisherEnvelope(value).ok;
 }

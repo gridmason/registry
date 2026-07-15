@@ -45,12 +45,23 @@ countersign time — intake creates only the immutable blobs and the artifact re
 ## Signature envelope
 
 Every version carries a publisher signature envelope (keyless by default,
-Sigstore-style, OIDC-bound — SPEC §2). **This phase validates the envelope
-structurally only** — a DSSE-shaped object (`payloadType` + `payload` +
-non-empty `signatures[]`) — and stores it opaquely with the artifact. A
-missing/malformed envelope is refused `400 invalid_envelope`. Cryptographic
-verification against the `@gridmason/protocol` envelope types is deferred to
-countersign (#10), gated on protocol P-E3 publishing those types.
+Sigstore-style, OIDC-bound — SPEC §2). Intake validates that it is the
+**`@gridmason/protocol` `SignatureEnvelope` publisher half** — `{ formatVersion,
+subject{ artifact, releaseHash }, publisherSig{ alg, cert, issuer, subjectClaims,
+sig } }` — the shape `gridmason publish` uploads and the countersign stage
+consumes. The check is **structural** (it proves the shape and field types via the
+same parser countersign uses, `src/countersign/countersign.ts` — so intake never
+accepts an envelope countersign cannot parse); the signature itself is verified
+cryptographically at countersign (#10), and by a host with `@gridmason/protocol`
+before it loads. A missing or malformed envelope is refused `400 invalid_envelope`.
+
+> **Breaking change (registry#55, owner decision on gridmason/cli#70).** Intake
+> previously accepted the bare **DSSE** shape (`payloadType` + `payload` +
+> `signatures[]`) that `@gridmason/cli` ≤ 0.5.x uploaded. The CLI now emits the
+> protocol `SignatureEnvelope`, so DSSE is no longer accepted — an upload from
+> `@gridmason/cli` ≤ 0.5.x is refused `400 invalid_envelope`. **Migration:**
+> publishers upgrade to `@gridmason/cli` ≥ 0.6.0 (`npm i -g @gridmason/cli`); no
+> registry configuration changes.
 
 ## Endpoint
 
@@ -72,10 +83,16 @@ Request body (JSON; each file part carries its exact bytes base64-encoded):
     { "path": "README.md",           "role": "doc",      "bytes": "<base64>" }
   ],
   "sourceArchive": "<base64>",  // signed source archive (GW-D19 interim review input)
-  "envelope": {                 // DSSE-shaped publisher signature envelope
-    "payloadType": "application/vnd.gridmason.artifact+json",
-    "payload": "<base64>",
-    "signatures": [{ "sig": "<base64>", "keyid": "…" }]
+  "envelope": {                 // @gridmason/protocol SignatureEnvelope (publisher half)
+    "formatVersion": "1.0",
+    "subject": { "artifact": "acme-clock@1.2.0", "releaseHash": "sha2-256:…" },
+    "publisherSig": {
+      "alg": "ES256",
+      "cert": "<base64 DER leaf>",
+      "issuer": "https://…",
+      "subjectClaims": { "email": "dev@acme.example" },
+      "sig": "<base64 IEEE-P1363>"
+    }
   }
 }
 ```
@@ -109,7 +126,7 @@ Responses:
 | `400` | `invalid_request` | body missing `tag`/`version`/`files`/`sourceArchive`, or wrong types |
 | `400` | `invalid_artifact` | a file part is malformed (bad role, non-base64 bytes, duplicate path), or not exactly one manifest + one entry |
 | `400` | `invalid_tag` | `tag` is structurally invalid (not a lowercase, hyphenated custom-element name) |
-| `400` | `invalid_envelope` | the publisher signature envelope is missing or not DSSE-shaped |
+| `400` | `invalid_envelope` | the publisher signature envelope is missing or not a protocol `SignatureEnvelope` (includes the legacy DSSE shape from `@gridmason/cli` ≤ 0.5.x) |
 | `401` | `missing_token` | no bearer token |
 | `401` | `invalid_token` | token malformed, oversized, missing `iss`/`sub`, or signature does not verify |
 | `401` | `token_expired` / `token_not_yet_valid` | token `exp`/`nbf` outside tolerance |

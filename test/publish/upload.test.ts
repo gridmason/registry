@@ -6,9 +6,15 @@ import { parseArtifactUpload } from '../../src/artifact/upload.js';
 const b64 = (s: string): string => Buffer.from(s).toString('base64');
 
 const validEnvelope = {
-  payloadType: 'application/vnd.gridmason.artifact+json',
-  payload: b64('{"tag":"acme-clock"}'),
-  signatures: [{ sig: 'MEUCIQ', keyid: 'oidc' }],
+  formatVersion: '1.0',
+  subject: { artifact: 'acme-clock@1.2.0', releaseHash: `sha2-256:${'ab'.repeat(32)}` },
+  publisherSig: {
+    alg: 'ES256',
+    cert: 'MIIBQ2R1bW15Y2VydA==',
+    issuer: 'https://issuer.example',
+    subjectClaims: { email: 'dev@acme.example' },
+    sig: 'ZHVtbXktc2ln',
+  },
 };
 
 function validBody(): Record<string, unknown> {
@@ -108,7 +114,7 @@ describe('parseArtifactUpload', () => {
 });
 
 describe('isStructurallyValidEnvelope', () => {
-  it('accepts a DSSE-shaped envelope', () => {
+  it('accepts a protocol SignatureEnvelope publisher half', () => {
     expect(isStructurallyValidEnvelope(validEnvelope)).toBe(true);
   });
 
@@ -116,11 +122,17 @@ describe('isStructurallyValidEnvelope', () => {
     ['null', null],
     ['an array', [validEnvelope]],
     ['a string', 'envelope'],
-    ['a missing payloadType', { payload: 'p', signatures: [{ sig: 's' }] }],
-    ['a missing payload', { payloadType: 't', signatures: [{ sig: 's' }] }],
-    ['empty signatures', { payloadType: 't', payload: 'p', signatures: [] }],
-    ['a signature without sig', { payloadType: 't', payload: 'p', signatures: [{ keyid: 'k' }] }],
-    ['a non-array signatures', { payloadType: 't', payload: 'p', signatures: 's' }],
+    ['a bad formatVersion', { ...validEnvelope, formatVersion: 'x' }],
+    ['a missing subject', { formatVersion: '1.0', publisherSig: validEnvelope.publisherSig }],
+    ['a subject without releaseHash', { ...validEnvelope, subject: { artifact: 'acme-clock@1.2.0' } }],
+    ['a missing publisherSig', { formatVersion: '1.0', subject: validEnvelope.subject }],
+    ['a non-ES256 alg', { ...validEnvelope, publisherSig: { ...validEnvelope.publisherSig, alg: 'RS256' } }],
+    ['an empty cert', { ...validEnvelope, publisherSig: { ...validEnvelope.publisherSig, cert: '' } }],
+    ['non-string subjectClaims', { ...validEnvelope, publisherSig: { ...validEnvelope.publisherSig, subjectClaims: { n: 1 } } }],
+    // The legacy DSSE shape @gridmason/cli ≤ 0.5.x uploaded is now rejected (registry#55).
+    ['a legacy DSSE envelope', { payloadType: 't', payload: 'p', signatures: [{ sig: 's' }] }],
+    // A publisher must not present the registry countersignature; the parser rejects it.
+    ['an already-countersigned envelope', { ...validEnvelope, registrySig: { alg: 'ES256', cert: 'c', sig: 's' } }],
   ])('rejects %s', (_label, value) => {
     expect(isStructurallyValidEnvelope(value)).toBe(false);
   });

@@ -40,7 +40,7 @@ review case is undecided — oldest first. Each item carries the artifact
       "checks": {
         "status": "pass",
         "module": "@gridmason/cli/checks",
-        "version": "0.0.3",
+        "version": "0.6.0",
         "checkIds": ["manual", "manifest.schema", "sdk.raw-network", "…"]
       }
     }

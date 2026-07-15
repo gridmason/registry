@@ -29,9 +29,15 @@ const vectorBase64 = Buffer.from(hashVector.inputHex, 'hex').toString('base64');
 const b64 = (s: string): string => Buffer.from(s).toString('base64');
 
 const validEnvelope = {
-  payloadType: 'application/vnd.gridmason.artifact+json',
-  payload: b64('{"tag":"acme-clock"}'),
-  signatures: [{ sig: 'MEUCIQ', keyid: 'oidc' }],
+  formatVersion: '1.0',
+  subject: { artifact: 'acme-clock@1.2.0', releaseHash: `sha2-256:${'ab'.repeat(32)}` },
+  publisherSig: {
+    alg: 'ES256',
+    cert: 'MIIBQ2R1bW15Y2VydA==',
+    issuer: 'https://issuer.example',
+    subjectClaims: { email: 'dev@acme.example' },
+    sig: 'ZHVtbXktc2ln',
+  },
 };
 
 function uploadBody(overrides: Record<string, unknown> = {}): Record<string, unknown> {

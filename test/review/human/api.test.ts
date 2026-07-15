@@ -30,9 +30,15 @@ const b64 = (value: string): string => Buffer.from(value).toString('base64');
 const b64json = (value: unknown): string => b64(JSON.stringify(value));
 
 const validEnvelope = {
-  payloadType: 'application/vnd.gridmason.artifact+json',
-  payload: b64('{"tag":"acme-clock"}'),
-  signatures: [{ sig: 'MEUCIQ', keyid: 'oidc' }],
+  formatVersion: '1.0',
+  subject: { artifact: 'acme-clock@1.2.0', releaseHash: `sha2-256:${'ab'.repeat(32)}` },
+  publisherSig: {
+    alg: 'ES256',
+    cert: 'MIIBQ2R1bW15Y2VydA==',
+    issuer: 'https://issuer.example',
+    subjectClaims: { email: 'dev@acme.example' },
+    sig: 'ZHVtbXktc2ln',
+  },
 };
 
 const validManifest = {
