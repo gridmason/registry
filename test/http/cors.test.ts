@@ -32,6 +32,7 @@ const ORIGIN = 'http://localhost:5173'; // the local dashboard, the acceptance s
 /** A concrete request URL for each public route template (params filled with dummies). */
 const PUBLIC_REQUESTS: ReadonlyArray<{ method: 'GET' | 'POST'; template: string; url: string; body?: object }> = [
   { method: 'POST', template: '/v1/resolve', url: '/v1/resolve', body: { registry: REGISTRY_ID, modules: [] } },
+  { method: 'GET', template: '/v1/widgets', url: '/v1/widgets' },
   { method: 'GET', template: '/v1/revocation/feed', url: '/v1/revocation/feed' },
   { method: 'GET', template: '/v1/artifacts/:hash', url: '/v1/artifacts/sha2-256:deadbeef' },
   { method: 'GET', template: '/v1/releases/:hash', url: '/v1/releases/sha2-256:deadbeef' },

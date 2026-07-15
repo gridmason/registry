@@ -26,6 +26,7 @@ import type { ArtifactStore } from '../artifact/store.js';
 import type { PublisherStore } from '../publisher/store.js';
 import type { ReleaseDocStore } from '../release/store.js';
 import type { ObjectStore } from '../storage/object-store.js';
+import { classifyDistributability } from './distributable.js';
 import { defaultOffer, pickOffer } from './shared-scope.js';
 import type {
   ExcludedModule,
@@ -56,8 +57,6 @@ export interface ResolutionLogger {
   error(obj: object, msg?: string): void;
 }
 
-/** The only artifact state a fragment may load from (SPEC §3, §6). */
-const DISTRIBUTABLE_STATE = 'approved';
 
 /**
  * A cross-check against the signed revocation/kill feed (#14). The artifact
@@ -170,30 +169,34 @@ async function resolveModule(
   );
   if (artifact === null) return 'unknown_module';
 
-  // Distribution gate: only an approved artifact is loadable, so a revoked, killed,
-  // rejected, or still-in-review artifact never enters a fragment (SPEC §6).
-  if (artifact.state !== DISTRIBUTABLE_STATE) return 'not_distributable';
-
-  // #14 feed cross-check: exclude a release the signed revocation/kill feed lists,
-  // even when its lifecycle `state` is still `approved` (a revoke/kill reflected in
-  // the feed ahead of the state write). With both gates, resolution is `state ∧ feed`.
-  if (deps.revocationCheck) {
-    const revoked = await deps.revocationCheck.isRevoked({
-      artifactId: artifact.id,
-      tag: module.tag,
-      publisher: module.publisher,
-    });
-    if (revoked) return 'not_distributable';
-  }
-
+  // The distribution gate — `state ∧ feed`, plus a countersigned, log-anchored
+  // release (SPEC §3, §6). This is the **same predicate the widgets catalog gates
+  // on** (`./distributable`), so "what a host can load" and "what the catalog
+  // lists" never drift. The `#14` feed cross-check excludes a release the signed
+  // feed lists even when its lifecycle `state` is still `approved` (a revoke/kill
+  // reflected in the feed ahead of the state write).
+  const revoked = deps.revocationCheck
+    ? await deps.revocationCheck.isRevoked({
+        artifactId: artifact.id,
+        tag: module.tag,
+        publisher: module.publisher,
+      })
+    : false;
   const release = await releaseDocStore.findByArtifact(artifact.id);
-  if (release === null) return 'no_release';
-  if (release.logEntry === null) {
+  const outcome = classifyDistributability({
+    state: artifact.state,
+    revoked,
+    hasRelease: release !== null,
+    hasLogEntry: release?.logEntry != null,
+  });
+  if (outcome === 'unresolvable_release' && release !== null && release.logEntry === null) {
     // An approved artifact whose release row carries no log entry cannot be
     // verified by a host; treat it as unresolvable rather than emit an unverifiable URL.
     logger?.error({ artifactId: artifact.id }, 'resolution: release has no log entry');
-    return 'unresolvable_release';
   }
+  if (outcome !== 'distributable') return outcome;
+  // `distributable` guarantees a release with a log entry; narrow for the type system.
+  if (release === null || release.logEntry === null) return 'unresolvable_release';
 
   const manifest = await loadManifest(release.releaseDoc.files, objectStore, logger);
   if (manifest === null) return 'unresolvable_release';

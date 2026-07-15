@@ -11,5 +11,6 @@ roster, countersign key, operator set) lives in [`../config.md`](../config.md).
 | [`publisher.md`](publisher.md) | Publisher records + prefix registration — the identity/ownership foundation the publish and review lanes check against. |
 | [`artifact-status.md`](artifact-status.md) | Review status + appeal — the publisher-facing surface the CLI polls after upload to read the review outcome and route a rejection to a second reviewer. |
 | [`resolution.md`](resolution.md) | Resolution — turns a host's enabled-remote snapshot into a hash-pinned import-map fragment host shells load widgets from. |
+| [`widgets.md`](widgets.md) | Widget catalog — the anonymous list/search surface a host browses to show users what published widgets a registry offers. |
 | [`revocation-feed.md`](revocation-feed.md) | Signed revocation & kill feed — the registry's published distribution state (whether an already-published artifact is still loadable) that hosts poll. |
 | [`audit.md`](audit.md) | Audit log — the operator-gated query endpoint for the auditable trail of every registry state transition. |
