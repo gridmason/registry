@@ -31,6 +31,7 @@
     "policy:render": "tsx scripts/render-policy.ts",
     "policy:check": "tsx scripts/render-policy.ts --check",
     "trust-root:init": "tsx scripts/trust-root-init.ts",
+    "log-key:gen": "tsx scripts/log-key-gen.ts",
     "rotate:root": "tsx scripts/rotate-root.ts",
     "rotate:dry-run": "tsx scripts/rotate-dry-run.ts"
   },

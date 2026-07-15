@@ -158,6 +158,15 @@ export interface TransparencyLogConfig {
   /** Base URL of the Rekor instance when `driver === 'rekor'` (e.g. the public `https://rekor.sigstore.dev`). */
   readonly rekorUrl: string;
   /**
+   * A **stable** signing key for the in-process `memory` log, as base64 of a
+   * PKCS#8 DER Ed25519 private key (`TRANSPARENCY_LOG_MEMORY_KEY`; generate with
+   * `npm run log-key:gen`). Empty means a fresh key is generated each boot — the
+   * ephemeral default, whose checkpoints no host can pin across restarts. Set it
+   * so `trust-root:init` can publish the log key and a host can verify releases
+   * after a restart. Dev/e2e only; a production instance anchors to `rekor`.
+   */
+  readonly memoryKeyDerBase64: string;
+  /**
    * The log's checkpoint `origin` line (its identity in signed tree heads).
    * Defaults to this registry's id so a self-hosted `memory` log names itself.
    */
@@ -395,10 +404,17 @@ function validateTransparencyLog(nodeEnv: NodeEnv, log: TransparencyLogConfig): 
 export function collectBootWarnings(config: Config): string[] {
   const warnings: string[] = [];
   if (config.nodeEnv !== 'production' && config.transparencyLog.driver === 'memory') {
+    const stable = config.transparencyLog.memoryKeyDerBase64 !== '';
     warnings.push(
       'TRANSPARENCY_LOG_DRIVER=memory: using the in-process transparency log — ' +
         'not durable and not publicly anchored. Fine for dev/test; set ' +
-        'TRANSPARENCY_LOG_DRIVER=rekor for any instance that ships real releases.',
+        'TRANSPARENCY_LOG_DRIVER=rekor for any instance that ships real releases.' +
+        (stable
+          ? ' Signing key is STABLE (TRANSPARENCY_LOG_MEMORY_KEY) — pinnable and ' +
+            'stable across restarts (publish it via trust-root:init).'
+          : ' Signing key is EPHEMERAL (regenerated each boot) — previously logged ' +
+            'releases cannot be verified after a restart, and no host can pin it. ' +
+            'Set TRANSPARENCY_LOG_MEMORY_KEY (npm run log-key:gen) for a stable key.'),
     );
   }
   if (config.nodeEnv === 'production' && config.transparencyLog.driver === 'memory') {
@@ -428,6 +444,7 @@ export function loadConfig(env: Env = process.env): Config {
       'TRANSPARENCY_LOG_ORIGIN',
       readString(env, 'REGISTRY_ID', 'registry.local'),
     ),
+    memoryKeyDerBase64: readString(env, 'TRANSPARENCY_LOG_MEMORY_KEY', ''),
     allowMemoryInProduction: readBool(env, 'TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION', false),
   };
   validateTransparencyLog(nodeEnv, transparencyLog);
