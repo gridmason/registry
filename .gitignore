@@ -6,3 +6,13 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Per-instance install artifacts (generated locally; never committed).
+trust-root.json
+countersign.key
+countersign.crt
+
+# Rotation artifacts (docs/self-host/rotation.md; generated locally, never committed).
+new-countersign.key
+new-countersign.crt
+trust-root.overlap.json
