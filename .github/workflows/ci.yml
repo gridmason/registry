@@ -129,3 +129,62 @@ jobs:
       - name: Tear down
         if: always()
         run: docker compose down -v || true
+
+  full-chain-e2e:
+    name: Full-chain e2e (compose)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      # The FR-13 full-chain e2e boots the real service in-process against the
+      # R-E0 compose backing stores (Postgres + object store) and drives the chain
+      # over real HTTP: publisher register → DSSE upload → real automated review →
+      # /status poll → human approve → (seeded release) countersign → resolve →
+      # verify → kill → signed-feed authenticate + stale-past-TTL fail-closed.
+      # See docs/e2e.md for the chain and what is compose-driven vs seeded.
+
+      # Bring up only the backing stores (the documented "run the service from the
+      # host" compose mode — see compose.yaml); the e2e is the service under test.
+      - name: Bring up compose backing stores (Postgres + object store)
+        run: docker compose up -d postgres minio createbuckets
+
+      - name: Wait for Postgres to accept connections
+        run: |
+          for i in $(seq 1 60); do
+            if docker compose exec -T postgres pg_isready -U gridmason -d gridmason >/dev/null 2>&1; then
+              echo "postgres ready"; exit 0
+            fi
+            echo "attempt $i: postgres not ready, retrying..."; sleep 2
+          done
+          echo "postgres did not become ready in time"; docker compose logs; exit 1
+
+      - name: Wait for the object store to report ready
+        run: |
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/minio/health/ready || true)
+            if [ "$code" = "200" ]; then echo "minio ready"; exit 0; fi
+            echo "attempt $i: minio health returned '$code', retrying..."; sleep 2
+          done
+          echo "minio did not become ready in time"; docker compose logs; exit 1
+
+      # Apply the schema against the compose Postgres (idempotent; the documented
+      # `npm run migrate` path — install.md §1). Config defaults target the compose
+      # published ports (localhost:5432 / localhost:9000), so no env overrides.
+      - name: Apply database migrations
+        run: npm run migrate
+
+      - name: Run the full-chain e2e
+        run: npm run test:e2e
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: docker compose logs || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v || true
