@@ -34,6 +34,7 @@ import {
   type FeedEntryStore,
 } from './revocation/index.js';
 import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js';
+import { artifactStatusRoutes } from './http/artifact-status.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
 import { resolutionRoutes } from './http/resolution.js';
@@ -50,6 +51,7 @@ import {
 } from './http/readiness.js';
 import type { Logger } from './logging/index.js';
 import { createPostgresPublisherStore, type PublisherStore } from './publisher/store.js';
+import { createAppealStage } from './review/appeal.js';
 import { createAutomatedReviewStage } from './review/automated.js';
 import { createHumanReviewLane } from './review/human/lane.js';
 import { createPostgresReviewCaseStore, type ReviewCaseStore } from './review/store.js';
@@ -313,6 +315,20 @@ export async function buildServer(options: BuildServerOptions) {
         lane,
         verifier,
         reviewerIdentities: config.review.reviewerIdentities,
+        registryId: config.registryId,
+      });
+
+      // The publisher-facing status + appeal surface (#47, FR-11): the endpoints
+      // `gridmason publish` polls and `gridmason appeal` calls. Owner-scoped (the
+      // caller must own the artifact) and mounted alongside the review lane — it
+      // reads the same review-case store for findings and re-opens rejected
+      // artifacts back into the lane's queue via the appeal stage.
+      await app.register(artifactStatusRoutes, {
+        publisherStore,
+        artifactStore,
+        reviewCaseStore,
+        appealStage: createAppealStage({ artifactStore, reviewCaseStore }),
+        verifier,
         registryId: config.registryId,
       });
 

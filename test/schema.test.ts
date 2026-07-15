@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { migration0001 } from '../src/db/migrations/0001_initial_schema.js';
 import { migration0002 } from '../src/db/migrations/0002_publisher_oidc_claims.js';
 import { migration0004 } from '../src/db/migrations/0004_review_case_waiver.js';
+import { migration0006 } from '../src/db/migrations/0006_review_case_appeal.js';
 import { migrations } from '../src/db/migrations/index.js';
 
 /**
@@ -82,5 +83,17 @@ describe('review case waiver migration', () => {
 
   it('is registered exactly once in the ordered set', () => {
     expect(migrations.filter((m) => m.id === migration0004.id)).toHaveLength(1);
+  });
+});
+
+describe('review case appeal migration', () => {
+  it('adds the appeal + excluded-reviewer columns idempotently', () => {
+    const sql = migration0006.up;
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS is_appeal boolean NOT NULL DEFAULT false/);
+    expect(sql).toMatch(/ADD COLUMN IF NOT EXISTS excluded_reviewer text/);
+  });
+
+  it('is registered exactly once in the ordered set', () => {
+    expect(migrations.filter((m) => m.id === migration0006.id)).toHaveLength(1);
   });
 });
