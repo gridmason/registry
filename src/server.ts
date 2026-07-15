@@ -35,6 +35,7 @@ import {
 } from './revocation/index.js';
 import { createTransparencyLog, type TransparencyLog } from './sigstore/index.js';
 import { artifactStatusRoutes } from './http/artifact-status.js';
+import { registerPublicCors } from './http/cors.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
 import { resolutionRoutes } from './http/resolution.js';
@@ -156,6 +157,11 @@ export async function buildServer(options: BuildServerOptions) {
   app.addHook('onSend', async (request, reply) => {
     reply.header(config.requestIdHeader, request.id);
   });
+
+  // Wildcard CORS on the anonymous public surfaces only (#57), so a browser host
+  // (the dashboard, any embedding app) can call the distribution API cross-origin.
+  // The authenticated control plane is deliberately left non-CORS (see cors.ts).
+  registerPublicCors(app, { requestIdHeader: config.requestIdHeader });
 
   await app.register(healthRoutes, {
     readiness,

@@ -56,6 +56,38 @@ remotes serve as `text/javascript` (native ESM loading, GW-D22, refuses anything
 else); an unrecognized extension falls back to the non-executable
 `application/octet-stream`.
 
+## CORS
+
+Both serving surfaces are **anonymous**, so a browser-based host — the Gridmason
+Dashboard on `localhost:5173` fetching from a registry on `localhost:8080`, or any
+embedding app — must be able to read them cross-origin. They send **wildcard CORS**:
+
+```
+Access-Control-Allow-Origin: *
+Access-Control-Expose-Headers: etag, x-request-id
+```
+
+and answer a preflight `OPTIONS` with `204` +
+`Access-Control-Allow-Methods: GET, OPTIONS`,
+`Access-Control-Allow-Headers: content-type`, and a 10-minute
+`Access-Control-Max-Age`. A wildcard is the right posture across the anonymous
+public surfaces (this origin, `POST /v1/resolve`, `GET /v1/revocation/feed`, and the
+anonymous publisher/prefix reads): they take **no credentials** — so no
+`Access-Control-Allow-Credentials` — and the bytes are **hash-addressed** (or, for a
+release document, **registry-signed**), a host verifies them with
+`@gridmason/protocol` before trusting, and the `ETag` a host reads for caching is
+the content hash it was going to verify anyway. The requesting origin is not a trust
+boundary here.
+
+`Access-Control-Expose-Headers` lists `etag` (the content-hash validator) and the
+correlation-id header; the other headers above are CORS-safelisted response headers
+a host reads without them being listed. The **authenticated** control plane
+(publisher registration, review lane, ops revoke/kill, publisher-facing
+status/appeal) deliberately sends **no** CORS — a cross-origin browser preflight for
+its `Authorization` header finds no matching response and is blocked, keeping the
+control plane non-browser-callable. The wiring + route allowlist is
+[`src/http/cors.ts`](../src/http/cors.ts).
+
 ## Immutability and the hot path
 
 The surface exposes **no mutation**. There is no route that overwrites or deletes
