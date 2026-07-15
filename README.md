@@ -2,10 +2,13 @@
 
 Gridmason Registry — open-source, self-hostable federated widget/plugin registry: signed content-hashed remotes, publisher records, review pipeline, dual-signature + transparency log. Flagship hosted instance: `registry.gridmason.dev`. Public OSS (AGPL-3.0). Engineering spec: `docs/SPEC.md` · Build plan: `docs/specs/registry-v0/spec.md`.
 
-> **Status:** service skeleton (R-E0). This is the runnable spine — HTTP server,
-> config, health, structured logging, and the audit seam. It deliberately
-> implements **no** publish, review, serving, or resolution behaviour; those
-> arrive in later epics.
+> **Status:** the core registry lanes are shipped (epics R-E0…R-E2). A working
+> publish pipeline accepts content-hashed artifacts, moves them through automated
+> checks and the human review lane, countersigns approvals, and anchors them in a
+> transparency log; serving and resolution hand the resulting signed releases to
+> hosts; and a signed revocation & kill feed publishes distribution state. The
+> remaining Phase B work is the full-chain end-to-end (author → publish → verify)
+> integration, tracked in [#19](https://github.com/gridmason/registry/issues/19).
 
 ## Requirements
 
@@ -30,7 +33,7 @@ Then:
 
 ```sh
 curl -i localhost:8080/healthz   # 200 while the process is up
-curl -i localhost:8080/readyz    # 503 until the storage layer lands (#3)
+curl -i localhost:8080/readyz    # 200 once Postgres and the object store are reachable
 ```
 
 Configuration is entirely environment-driven — see [`docs/config.md`](docs/config.md)
@@ -46,8 +49,9 @@ PORT=3000 LOG_LEVEL=debug npm start
 - `GET /healthz` — **liveness**. Returns `200` with `{ "status": "ok", ... }`
   whenever the process is up.
 - `GET /readyz` — **readiness**. Returns `200` only when every readiness probe
-  passes, `503` otherwise (body lists the failing checks). Reports not-ready
-  until the storage layer (#3) is wired in.
+  passes, `503` otherwise (body lists the failing checks). Probes Postgres and
+  the object store, so it reports ready only once both backing stores are
+  reachable.
 
 ### Logging
 
@@ -89,7 +93,7 @@ src/
   audit/          FR-12 audit seam: emitAuditEvent + pluggable sink
   http/
     health.ts     /healthz + /readyz routes
-    readiness.ts  readiness-probe registry (storage probe pending #3)
+    readiness.ts  readiness-probe registry (Postgres + object-store probes)
 test/             Vitest suites
 ```
 
@@ -122,6 +126,25 @@ operator's, and it is published (no secret rules, SPEC §4). The in-repo templat
 renders two variants from one source: the flagship invite-only launch instance
 and the neutral self-host default. See [`docs/policy/`](docs/policy/) and run
 `npm run policy:render`.
+
+## Documentation
+
+- [`docs/SPEC.md`](docs/SPEC.md) — the engineering spec: the design and the
+  requirements the service implements.
+- [`docs/config.md`](docs/config.md) — the authoritative reference for every
+  configuration variable and its default.
+- **API reference** ([`docs/api/`](docs/api/README.md)) — the control-plane
+  surfaces: [publish](docs/api/publish.md), [publisher](docs/api/publisher.md),
+  [artifact status + appeal](docs/api/artifact-status.md),
+  [resolution](docs/api/resolution.md),
+  [revocation & kill feed](docs/api/revocation-feed.md), and
+  [audit log](docs/api/audit.md).
+- **Self-hosting** ([`docs/self-host/`](docs/self-host/install.md)) — the
+  [install quickstart](docs/self-host/install.md), the
+  [operator config view](docs/self-host/config.md), and the
+  [trust-root rotation runbook](docs/self-host/rotation.md).
+- [`docs/countersign.md`](docs/countersign.md) — countersign-key custody and the
+  transparency-log / Sigstore evaluation.
 
 ## Contributing & community
 
