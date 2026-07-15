@@ -39,6 +39,8 @@ import { registerPublicCors } from './http/cors.js';
 import { healthRoutes } from './http/health.js';
 import { publishRoutes } from './http/publish.js';
 import { resolutionRoutes } from './http/resolution.js';
+import { widgetRoutes } from './http/widgets.js';
+import { createWidgetCatalogService } from './widgets/service.js';
 import type { RevocationCheck } from './resolution/index.js';
 import { servingRoutes } from './http/serving.js';
 import { publisherRoutes } from './http/publisher.js';
@@ -275,6 +277,21 @@ export async function buildServer(options: BuildServerOptions) {
         objectStore,
         registryId: config.registryId,
         revocationCheck,
+      });
+
+      // Widget catalog (#63): the anonymous list/search surface. It gates on the
+      // same distributability predicate resolution uses (one definition), and
+      // reads the same publisher/artifact/release/object stores — so it mounts on
+      // the same four-store condition, alongside (not part of) resolution.
+      await app.register(widgetRoutes, {
+        service: createWidgetCatalogService({
+          artifactStore,
+          releaseDocStore: servingReleaseDocStore,
+          publisherStore,
+          objectStore,
+          revocationCheck,
+          logger,
+        }),
       });
     }
 

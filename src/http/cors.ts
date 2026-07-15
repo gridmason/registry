@@ -61,6 +61,7 @@ export interface PublicCorsRoute {
  */
 export const PUBLIC_CORS_ROUTES: readonly PublicCorsRoute[] = [
   { method: 'POST', url: '/v1/resolve' }, // resolution — gate snapshot → import-map fragment
+  { method: 'GET', url: '/v1/widgets' }, // widget catalog — list/search published widgets
   { method: 'GET', url: '/v1/revocation/feed' }, // signed revocation & kill feed
   { method: 'GET', url: '/v1/artifacts/:hash' }, // hash-addressed serving origin
   { method: 'GET', url: '/v1/releases/:hash' }, // countersigned release documents
