@@ -23,6 +23,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:watch": "vitest",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
@@ -36,7 +37,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",
     "@gridmason/cli": "^0.0.3",
-    "@gridmason/protocol": "^0.3.0",
+    "@gridmason/protocol": "^0.4.0",
     "fastify": "^5.2.0",
     "jose": "^6.2.3",
     "pg": "^8.22.0",
