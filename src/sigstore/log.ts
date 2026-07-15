@@ -18,6 +18,8 @@
  */
 import {
   createHash,
+  createPrivateKey,
+  createPublicKey,
   generateKeyPairSync,
   sign as nodeSign,
   type KeyObject,
@@ -64,6 +66,55 @@ export interface LogPublicKey {
   readonly name: string;
   /** The raw 32-byte Ed25519 public key. */
   readonly key: Uint8Array;
+}
+
+/** Thrown when a configured stable memory-log key is not a usable Ed25519 key. */
+export class MemoryLogKeyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'MemoryLogKeyError';
+  }
+}
+
+/**
+ * Load the stable in-process-log signing key from its `TRANSPARENCY_LOG_MEMORY_KEY`
+ * env value: **base64 of a PKCS#8 DER Ed25519 private key** (the shape
+ * `npm run log-key:gen` emits). A stable key makes the memory log's checkpoints
+ * pinnable and survives restarts, so a previously countersigned release's
+ * inclusion proof still verifies after a reboot. Fails **loudly** — a garbage or
+ * non-Ed25519 value throws {@link MemoryLogKeyError} at boot rather than silently
+ * falling back to an ephemeral key no host could have pinned.
+ */
+export function loadStableMemoryKey(derBase64: string): KeyObject {
+  let key: KeyObject;
+  try {
+    key = createPrivateKey({ key: Buffer.from(derBase64, 'base64'), format: 'der', type: 'pkcs8' });
+  } catch (err) {
+    throw new MemoryLogKeyError(
+      'TRANSPARENCY_LOG_MEMORY_KEY is not a valid base64 PKCS#8 DER private key: ' +
+        `${(err as Error).message}. Generate one with \`npm run log-key:gen\`.`,
+    );
+  }
+  if (key.asymmetricKeyType !== 'ed25519') {
+    throw new MemoryLogKeyError(
+      `TRANSPARENCY_LOG_MEMORY_KEY must be an Ed25519 key, got ${key.asymmetricKeyType ?? 'unknown'}. ` +
+        'Generate one with `npm run log-key:gen`.',
+    );
+  }
+  return key;
+}
+
+/**
+ * Encode a {@link LogPublicKey} as the stable string a trust-root document's
+ * `logPublicKeys` carries and a host pins: `ed25519:<name>:<base64 raw 32-byte
+ * key>`. The `@gridmason/protocol` trust root treats these as opaque encoded
+ * strings; this is the registry's documented encoding (`docs/self-host/config.md`),
+ * self-describing so an operator can read the algorithm, the checkpoint name, and
+ * the raw key straight out of it. (Registry log origins are host-like ids with no
+ * `:`, so splitting on the first two colons round-trips the name.)
+ */
+export function encodeLogPublicKey(pk: LogPublicKey): string {
+  return `ed25519:${pk.name}:${Buffer.from(pk.key).toString('base64')}`;
 }
 
 /** The transparency log the countersign stage anchors releases in. */
@@ -117,11 +168,18 @@ export class InMemoryTransparencyLog implements TransparencyLog {
   private readonly logId: string;
   private readonly keyIdBytes: Uint8Array;
 
-  constructor(origin: string) {
+  /**
+   * @param origin the checkpoint signer identity (the log's `name`), usually the
+   *   registry id.
+   * @param privateKey an optional **stable** Ed25519 signing key (from
+   *   {@link loadStableMemoryKey}); when omitted a fresh key is generated per
+   *   construction (the ephemeral dev default — not pinnable across restarts).
+   */
+  constructor(origin: string, privateKey?: KeyObject) {
     this.origin = origin;
-    const { publicKey, privateKey } = generateKeyPairSync('ed25519');
-    this.privateKey = privateKey;
-    this.rawPublicKey = rawEd25519PublicKey(publicKey);
+    const key = privateKey ?? generateKeyPairSync('ed25519').privateKey;
+    this.privateKey = key;
+    this.rawPublicKey = rawEd25519PublicKey(createPublicKey(key));
     // Log id is the hex SHA-256 of the log's public key (the protocol's convention).
     this.logId = toHex(new Uint8Array(createHash('sha256').update(this.rawPublicKey).digest()));
     this.keyIdBytes = keyId(this.origin, this.rawPublicKey);

@@ -114,9 +114,26 @@ fingerprint to your host operators to pin. Optional fields:
 
 - **`OIDC_ISSUER_ALLOWLIST`** flows into the document's `issuerAllowlist` — the issuers
   that anchor authorship. Set it to the issuers you accept publisher registrations from.
-- **`TRUST_ROOT_LOG_PUBLIC_KEYS`** (comma-separated) pins your transparency log's
-  key(s). The in-process `memory` log's key is ephemeral and is left empty; set this
-  when you anchor to a durable log (Rekor).
+- **The transparency-log key** hosts pin inclusion proofs against, into
+  `logPublicKeys`. A host cannot verify a release without it (`verifyRelease` is
+  fail-closed), so populate it:
+  - **`memory` driver (dev/e2e):** give the in-process log a **stable** key so it is
+    pinnable and survives restarts (otherwise it is regenerated each boot and every
+    previously logged release stops verifying). Generate one, project it, and it is
+    added to `logPublicKeys` automatically:
+
+    ```sh
+    npm run log-key:gen                       # prints TRANSPARENCY_LOG_MEMORY_KEY=… + the public key
+    export TRANSPARENCY_LOG_MEMORY_KEY="…"     # project the private key into the service + this shell
+    ```
+
+    Re-run `npm run trust-root:init` with it set and the document carries
+    `logPublicKeys: ["ed25519:<origin>:<base64 key>"]`. The running service also
+    prints the active key at boot (`{ name, key }`) — copy it into your host
+    operators' `logPublicKey` pin.
+  - **`rekor` driver (production):** set **`TRUST_ROOT_LOG_PUBLIC_KEYS`**
+    (comma-separated) to the public Rekor instance's key; the registry does not
+    derive it.
 - **`TRUST_ROOT_PUBLISHER_CA_ROOTS`** (comma-separated) adds publisher-CA roots for the
   issued-cert authorship path; omit it for the keyless OIDC path this cut uses.
 

@@ -65,7 +65,8 @@ them at managed services.
 | Variable | Default | Self-host note |
 |---|---|---|
 | `TRANSPARENCY_LOG_REKOR_URL` | `https://rekor.sigstore.dev` | Rekor base URL when the driver is `rekor`. |
-| `TRANSPARENCY_LOG_ORIGIN` | *(the `REGISTRY_ID`)* | The log checkpoint `origin` line. Defaults to your registry id so a `memory` log names itself. |
+| `TRANSPARENCY_LOG_ORIGIN` | *(the `REGISTRY_ID`)* | The log checkpoint `origin` line (the log key's `name`). Defaults to your registry id so a `memory` log names itself. |
+| `TRANSPARENCY_LOG_MEMORY_KEY` | *(empty → ephemeral)* | A **stable** signing key for the in-process `memory` log, as base64 of a PKCS#8 DER Ed25519 private key. Empty regenerates a key each boot (not pinnable across restarts). Set it so hosts can pin the log and releases keep verifying after a restart. Generate with `npm run log-key:gen`. Dev/e2e only — production uses `rekor`. |
 | `TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION` | `false` | Escape hatch to run the non-durable `memory` log under `NODE_ENV=production`, accepting **no public anchoring**. The compose stack sets it so the quickstart boots; a real instance uses `rekor` instead. |
 | `REVOCATION_FEED_TTL_SECONDS` | `3600` | Freshness window stamped on the signed revocation/kill feed (1–86400; SPEC §6 caps at 24 h). The 1 h default keeps a kill within the online propagation bound. |
 
@@ -73,6 +74,32 @@ them at managed services.
 > **refused at boot** — a production instance that forgot `rekor` would silently skip the
 > public anchoring FR-5 promises. Set `rekor`, or set
 > `TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION=true` to deliberately accept no public log.
+
+### Pinning the transparency-log key
+
+A host verifies a release's inclusion proof against a **pinned transparency-log
+checkpoint key** (`verifyRelease` requires it, fail-closed), so an instance must be
+able to hand that key out. How depends on the driver:
+
+- **`memory` (dev/e2e).** The key is the Ed25519 checkpoint signer. Without
+  `TRANSPARENCY_LOG_MEMORY_KEY` it is **regenerated every boot**, so a restart
+  orphans every previously logged release's proof and no host can pin it. The flow
+  to fix that — **generate once → project as env → publish → hosts pin**:
+
+  ```sh
+  npm run log-key:gen        # prints TRANSPARENCY_LOG_MEMORY_KEY=… + the public key
+  export TRANSPARENCY_LOG_MEMORY_KEY="…"   # project the private key into the service
+  npm run trust-root:init    # now writes logPublicKeys: ["ed25519:<origin>:<base64 key>"]
+  ```
+
+  The service also **prints the active key at boot** as
+  `{ name, key }` (name = the log origin, key = base64 raw 32-byte Ed25519), so an
+  operator can copy it straight into a host's `logPublicKey` pin. The trust-root
+  document encodes each key as `ed25519:<name>:<base64 raw 32-byte key>`.
+
+- **`rekor` (production).** The registry does not operate the log, so it does not
+  derive a checkpoint key — hosts pin the **public Rekor instance's** key. Supply it
+  via `TRUST_ROOT_LOG_PUBLIC_KEYS` (below) so `trust-root:init` publishes it.
 
 ## Transport & runtime (defaults are usually fine)
 
@@ -105,7 +132,7 @@ when it generates an overlap document during a rotation (see the
 
 | Variable | Default | Self-host note |
 |---|---|---|
-| `TRUST_ROOT_LOG_PUBLIC_KEYS` | *(empty)* | Comma-separated transparency-log public keys hosts pin (SPEC §4.3). Empty for the ephemeral `memory` log; set when anchoring to a durable log. |
+| `TRUST_ROOT_LOG_PUBLIC_KEYS` | *(empty)* | Comma-separated transparency-log public keys hosts pin (SPEC §4.3), appended to what the registry derives. A **stable** `memory` log (`TRANSPARENCY_LOG_MEMORY_KEY`) is added automatically, so leave this empty for it; set it for the public **Rekor** key, or an ephemeral `memory` log has nothing to publish. |
 | `TRUST_ROOT_PUBLISHER_CA_ROOTS` | *(empty)* | Comma-separated publisher-CA roots for the issued-cert authorship path (SPEC §4.4). Omit for the keyless OIDC path this cut uses. |
 
 `--validity-days` (CLI flag, default `365`) sets the trust-root validity window.

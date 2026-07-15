@@ -42,6 +42,7 @@ import { parseTrustRoot, type TrustRootDoc } from '@gridmason/protocol';
 
 import { loadConfig, type Config } from '../src/config/index.js';
 import { loadCountersignIdentity } from '../src/countersign/index.js';
+import { activeStableLogPublicKey, encodeLogPublicKey } from '../src/sigstore/index.js';
 
 /** Wire-format version this build authors; the protocol verify lib accepts `1.x`. */
 const FORMAT_VERSION = '1.0';
@@ -145,9 +146,11 @@ export function generateTrustRootDoc(
     // Keyless OIDC is this cut's authorship path; a publisher-CA root is supplied
     // out of band by an operator who issues publisher certs (SPEC §4.4, optional).
     publisherCARoots: extra.publisherCARoots ?? [],
-    // The in-process `memory` log's key is ephemeral (regenerated each boot) and
-    // not a durable pin, so it is not emitted; an operator anchoring to a durable
-    // log (Rekor) supplies its pinned key here. Empty is valid (SPEC §4.3).
+    // Transparency-log keys hosts pin inclusion proofs against (SPEC §4.3). The
+    // caller ({@link main}) supplies the active `memory` log's **stable** key when
+    // one is configured (#61) and/or an operator's `TRUST_ROOT_LOG_PUBLIC_KEYS`
+    // (e.g. the public Rekor key). Empty is valid — an ephemeral memory key has no
+    // durable pin to publish.
     logPublicKeys: extra.logPublicKeys ?? [],
     notBefore: now,
     notAfter: now + validityDays * 24 * 60 * 60 * 1000,
@@ -162,6 +165,23 @@ export function generateTrustRootDoc(
     );
   }
   return parsed.doc;
+}
+
+/**
+ * The transparency-log public keys to publish in `logPublicKeys` (#61): the active
+ * `memory` log's **stable** key (derived from `TRANSPARENCY_LOG_MEMORY_KEY`) first,
+ * then any operator-supplied `TRUST_ROOT_LOG_PUBLIC_KEYS` (e.g. the public Rekor
+ * key in rekor mode). Deduped, order preserved. Empty when neither is present (an
+ * ephemeral memory key has no durable pin to publish).
+ */
+export function resolveLogPublicKeys(config: Config, env: NodeJS.ProcessEnv): string[] {
+  const active = activeStableLogPublicKey(config.transparencyLog);
+  return [
+    ...new Set([
+      ...(active ? [encodeLogPublicKey(active)] : []),
+      ...readList(env.TRUST_ROOT_LOG_PUBLIC_KEYS),
+    ]),
+  ];
 }
 
 /** Split a comma-separated env value into a trimmed, non-empty list (absent → []). */
@@ -215,7 +235,7 @@ export function main(argv: readonly string[], env: NodeJS.ProcessEnv = process.e
   const config = loadConfig(env);
   const doc = generateTrustRootDoc(config, Date.now(), options.validityDays, {
     publisherCARoots: readList(env.TRUST_ROOT_PUBLISHER_CA_ROOTS),
-    logPublicKeys: readList(env.TRUST_ROOT_LOG_PUBLIC_KEYS),
+    logPublicKeys: resolveLogPublicKeys(config, env),
   });
   const json = `${JSON.stringify(doc, null, 2)}\n`;
 
@@ -234,6 +254,9 @@ export function main(argv: readonly string[], env: NodeJS.ProcessEnv = process.e
   writeFileSync(options.out, json);
   process.stdout.write(`wrote ${options.out} for registry "${doc.registryId}"\n`);
   process.stdout.write(`  countersign root (pin this): ${doc.countersignRoots.join(', ')}\n`);
+  if (doc.logPublicKeys.length > 0) {
+    process.stdout.write(`  log public key (pin this): ${doc.logPublicKeys.join(', ')}\n`);
+  }
   process.stdout.write(
     `  valid ${new Date(doc.notBefore).toISOString()} → ${new Date(doc.notAfter).toISOString()}\n`,
   );

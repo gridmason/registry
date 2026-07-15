@@ -36,6 +36,7 @@ describe('loadConfig', () => {
         driver: 'memory',
         rekorUrl: 'https://rekor.sigstore.dev',
         origin: 'registry.local',
+        memoryKeyDerBase64: '',
         allowMemoryInProduction: false,
       },
       http: {
@@ -172,6 +173,7 @@ describe('loadConfig', () => {
       driver: 'rekor',
       rekorUrl: 'https://rekor.example',
       origin: 'log.example',
+      memoryKeyDerBase64: '',
       allowMemoryInProduction: false,
     });
   });
