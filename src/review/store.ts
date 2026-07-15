@@ -17,6 +17,18 @@ export interface CreateReviewCaseInput {
   readonly artifactId: string;
   /** The automated-checks report to persist as `checks_report`. */
   readonly checksReport: AutomatedReviewReport;
+  /**
+   * Whether this case is a publisher **appeal** re-opening a rejected artifact
+   * (SPEC §4). Defaults to `false` — the automated stage opens first-pass cases.
+   */
+  readonly isAppeal?: boolean;
+  /**
+   * On an appeal, the identity (composite form) of the reviewer who cast the
+   * original rejection, so the human lane refuses a verdict from them (appeal
+   * reviewer ≠ original reviewer). `null`/omitted when there is no reviewer to
+   * exclude (a first-pass case, or an appeal of an automated `system` rejection).
+   */
+  readonly excludedReviewer?: string | null;
 }
 
 /** The human verdict recorded on a review case by {@link ReviewCaseStore.recordVerdict}. */
@@ -47,6 +59,14 @@ export interface ReviewCaseRecord {
   readonly findings: readonly ReviewFinding[] | null;
   /** Whether the flagship self-review waiver was used to permit the verdict. */
   readonly waiverUsed: boolean;
+  /** Whether this case is a publisher appeal re-review (SPEC §4). */
+  readonly isAppeal: boolean;
+  /**
+   * The reviewer identity (composite) this appeal case may **not** be decided by
+   * — the original rejection's reviewer. `null` on a first-pass case or when the
+   * original rejection had no human reviewer (automated `system` rejection).
+   */
+  readonly excludedReviewer: string | null;
   readonly createdAt: Date;
   /** When the verdict was recorded, or `null` while the case is pending. */
   readonly decidedAt: Date | null;
@@ -77,6 +97,8 @@ interface ReviewCaseRow {
   readonly verdict: Verdict | null;
   readonly findings: readonly ReviewFinding[] | null;
   readonly waiver_used: boolean;
+  readonly is_appeal: boolean;
+  readonly excluded_reviewer: string | null;
   readonly created_at: Date;
   readonly decided_at: Date | null;
 }
@@ -90,23 +112,27 @@ function rowToRecord(row: ReviewCaseRow): ReviewCaseRecord {
     verdict: row.verdict,
     findings: row.findings,
     waiverUsed: row.waiver_used,
+    isAppeal: row.is_appeal,
+    excludedReviewer: row.excluded_reviewer,
     createdAt: row.created_at,
     decidedAt: row.decided_at,
   };
 }
 
 const SELECT_COLUMNS =
-  'id, artifact_id, checks_report, reviewer, verdict, findings, waiver_used, created_at, decided_at';
+  'id, artifact_id, checks_report, reviewer, verdict, findings, waiver_used, is_appeal, excluded_reviewer, created_at, decided_at';
 
 export function createPostgresReviewCaseStore(postgres: Postgres): ReviewCaseStore {
   return {
     async create(input) {
       // `checks_report` is jsonb; node-pg serialises the report object to JSON.
+      // `is_appeal`/`excluded_reviewer` default to a first-pass case; an appeal
+      // (src/review/appeal) passes them to route the second-reviewer rule.
       const { rows } = await postgres.query(
-        `INSERT INTO review_case (artifact_id, checks_report)
-           VALUES ($1, $2)
+        `INSERT INTO review_case (artifact_id, checks_report, is_appeal, excluded_reviewer)
+           VALUES ($1, $2, $3, $4)
            RETURNING ${SELECT_COLUMNS}`,
-        [input.artifactId, input.checksReport],
+        [input.artifactId, input.checksReport, input.isAppeal ?? false, input.excludedReviewer ?? null],
       );
       return rowToRecord(rows[0] as ReviewCaseRow);
     },
@@ -166,6 +192,8 @@ export class InMemoryReviewCaseStore implements ReviewCaseStore {
       verdict: null,
       findings: null,
       waiverUsed: false,
+      isAppeal: input.isAppeal ?? false,
+      excludedReviewer: input.excludedReviewer ?? null,
       createdAt: new Date(),
       decidedAt: null,
     };

@@ -8,8 +8,12 @@ satisfies **FR-4** and SPEC §4, §4a.
 
 This is the **one** review lane the SCOPE-minimal Phase B cut ships. It is
 **not** the T1/TF trust-tier ladder with SLAs (that is flagship policy / Phase C),
-there is no reviewer console (CLI/API only this phase), and appeals — the "second
-reviewer" path of SPEC §4 — are out of scope beyond the reviewer≠author rule.
+and there is no reviewer console (CLI/API only this phase). Appeals — the "second
+reviewer" path of SPEC §4 — re-enter this same lane: a publisher-initiated
+[appeal](../api/artifact-status.md#post-v1artifactsidappeal-route-a-second-review)
+re-opens a rejected artifact as a new `reviewing` case, and the lane enforces
+[appeal reviewer ≠ original reviewer](#appeal-reviewer--original-reviewer) on top
+of reviewer≠author.
 
 ## Endpoints
 
@@ -122,6 +126,18 @@ roster reaches ≥ 2 reviewers. It is controlled by
   `waiverUsed: true`.
 - With the waiver **off**, a self-review is refused even for a configured
   reviewer — the reviewer-set membership does not override the identity check.
+
+## Appeal reviewer ≠ original reviewer
+
+An [appeal](../api/artifact-status.md#post-v1artifactsidappeal-route-a-second-review)
+re-opens a rejected artifact for a **second** reviewer, never the original
+(SPEC §4). The appeal opens a new `reviewing` case (a decided case is never
+re-decided) that records the reviewer who cast the original rejection as its
+**excluded reviewer**. When a verdict is submitted on that case, the lane refuses
+it from the excluded identity with `403 appeal_reviewer_forbidden`, in addition to
+the reviewer≠author check — so the same person cannot reject then "re-review" the
+appeal. An automated (`system`) rejection records no human reviewer, so an appeal
+of one excludes nobody and any reviewer≠author may decide it.
 
 ## Reviewer set
 

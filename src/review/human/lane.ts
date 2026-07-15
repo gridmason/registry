@@ -50,6 +50,7 @@ export type VerdictRejection =
   | { readonly kind: 'not-in-review' }
   | { readonly kind: 'author-unresolved' }
   | { readonly kind: 'self-review' }
+  | { readonly kind: 'appeal-original-reviewer' }
   | { readonly kind: 'findings'; readonly code: FindingsRejection; readonly message: string }
   | { readonly kind: 'already-decided' }
   | { readonly kind: 'transition-failed' };
@@ -153,6 +154,16 @@ export function createHumanReviewLane(deps: HumanReviewLaneDeps): HumanReviewLan
       // is an integrity fault the FK should forbid, but the check must not depend
       // on that to stay safe).
       const reviewerId = composeOidcIdentity(input.reviewer.issuer, input.reviewer.subject);
+
+      // appeal reviewer ≠ original reviewer (SPEC §4): an appeal case records the
+      // reviewer who cast the original rejection; that identity cannot decide the
+      // re-review. Checked before author resolution — it is a reviewer-identity
+      // rule independent of authorship, and refusing early avoids resolving the
+      // author for a verdict that is refused anyway.
+      if (reviewCase.excludedReviewer !== null && reviewCase.excludedReviewer === reviewerId) {
+        return { ok: false, rejection: { kind: 'appeal-original-reviewer' } };
+      }
+
       const author = await publisherStore.findById(artifact.publisherId);
       if (!author) return { ok: false, rejection: { kind: 'author-unresolved' } };
       const authorId = composeOidcIdentity(author.issuer, author.subject);
