@@ -22,6 +22,11 @@ x-registry-env: &registry-env
   OBJECT_STORE_ACCESS_KEY_ID: gridmason
   OBJECT_STORE_SECRET_ACCESS_KEY: gridmason-dev-secret
   OBJECT_STORE_FORCE_PATH_STYLE: "true"
+  # The image sets NODE_ENV=production, so the #38 boot guard would refuse the
+  # default in-process (`memory`) transparency log. This local/self-host stack
+  # accepts running with no public anchoring, so it takes the documented override.
+  # A real instance sets TRANSPARENCY_LOG_DRIVER=rekor instead (docs/self-host/config.md).
+  TRANSPARENCY_LOG_ALLOW_MEMORY_IN_PRODUCTION: "true"
 
 services:
   postgres:

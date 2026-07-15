@@ -34,7 +34,8 @@ curl -i localhost:8080/readyz    # 503 until the storage layer lands (#3)
 ```
 
 Configuration is entirely environment-driven — see [`docs/config.md`](docs/config.md)
-for every variable and its default. Example:
+for every variable and its default. To stand up your own instance, follow the
+[self-host quickstart](docs/self-host/install.md). Example:
 
 ```sh
 PORT=3000 LOG_LEVEL=debug npm start

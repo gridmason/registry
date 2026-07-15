@@ -6,3 +6,8 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Per-instance install artifacts (generated locally; never committed).
+trust-root.json
+countersign.key
+countersign.crt
