@@ -5,6 +5,12 @@ are optional at this stage and fall back to the defaults below. Values are
 parsed and validated once at startup (`src/config`); an invalid value fails the
 boot immediately with a descriptive `ConfigError` rather than surfacing later.
 
+> This is the authoritative per-field reference. Standing up an instance? Start
+> with the [self-host quickstart](self-host/install.md); the
+> [self-host config view](self-host/config.md) is the same settings grouped by
+> what an operator must set, backing stores, and tuning — it links back here for
+> the full detail.
+
 | Variable | Default | Description |
 |---|---|---|
 | `NODE_ENV` | `development` | Deployment mode. One of `development`, `production`, `test`. |
